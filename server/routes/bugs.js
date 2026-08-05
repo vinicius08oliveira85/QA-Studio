@@ -1,0 +1,112 @@
+const express = require('express');
+
+module.exports = (db) => {
+  const router = express.Router();
+  const LIST_SQL = `
+    SELECT b.*,
+      e.test_case_id AS exec_test_case_id,
+      tc.code AS test_case_code, tc.title AS test_case_title,
+      r.code AS requirement_code, r.title AS requirement_title,
+      (SELECT COUNT(*) FROM bug_retests bt WHERE bt.bug_id = b.id) AS retests_count,
+      (SELECT bt.retest_date FROM bug_retests bt WHERE bt.bug_id = b.id ORDER BY bt.id DESC LIMIT 1) AS last_retest_date
+    FROM bugs b
+    LEFT JOIN executions e ON e.id = b.execution_id
+    LEFT JOIN test_cases tc ON tc.id = COALESCE(b.test_case_id, e.test_case_id)
+    LEFT JOIN requirements r ON r.id = COALESCE(b.requirement_id, tc.requirement_id)`;
+
+  router.get('/', (req, res) => {
+    const { projectId, status, severity } = req.query;
+    const params = [];
+    let sql = `${LIST_SQL} WHERE b.project_id = ?`;
+    params.push(projectId);
+    if (status) { sql += ' AND b.status = ?'; params.push(status); }
+    if (severity) { sql += ' AND b.severity = ?'; params.push(severity); }
+    sql += ' ORDER BY b.updated_at DESC';
+    res.json(db.prepare(sql).all(...params));
+  });
+
+  router.get('/:id', (req, res) => {
+    const row = db.prepare(`${LIST_SQL} WHERE b.id = ?`).get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
+    row.retests = db.prepare(`
+      SELECT bt.*, tc.code AS test_case_code, tc.title AS test_case_title,
+        e.result AS execution_result
+      FROM bug_retests bt
+      LEFT JOIN executions e ON e.id = bt.execution_id
+      LEFT JOIN test_cases tc ON tc.id = e.test_case_id
+      WHERE bt.bug_id = ? ORDER BY bt.id DESC
+    `).all(req.params.id);
+    res.json(row);
+  });
+
+  router.post('/', (req, res) => {
+    const { project_id, execution_id, test_case_id, requirement_id, code, title, description = '',
+      severity = 'Média', priority = 'Média', status = 'Aberto', steps_to_reproduce = '',
+      expected_result = '', actual_result = '', environment = '' } = req.body || {};
+    if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
+
+    // Integração: se veio de uma execução, herda caso e requisito
+    let tcId = test_case_id || null;
+    let reqId = requirement_id || null;
+    if (execution_id) {
+      const exec = db.prepare('SELECT test_case_id FROM executions WHERE id=?').get(execution_id);
+      if (exec) {
+        tcId = tcId || exec.test_case_id;
+        const tc = db.prepare('SELECT requirement_id FROM test_cases WHERE id=?').get(tcId);
+        if (tc?.requirement_id) reqId = reqId || tc.requirement_id;
+      }
+    }
+
+    const c = code || db.nextCode('bugs', 'BUG', project_id);
+    const r = db.prepare(
+      `INSERT INTO bugs (project_id, execution_id, test_case_id, requirement_id, code, title, description, severity, priority, status, steps_to_reproduce, expected_result, actual_result, environment)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(project_id, execution_id || null, tcId, reqId, c, title, description, severity, priority, status,
+      steps_to_reproduce, expected_result, actual_result, environment);
+    res.json({ id: Number(r.lastInsertRowid), code: c });
+  });
+
+  router.put('/:id', (req, res) => {
+    const { execution_id, test_case_id, requirement_id, code, title, description, severity, priority,
+      status, steps_to_reproduce, expected_result, actual_result, environment } = req.body || {};
+    db.prepare(
+      `UPDATE bugs SET execution_id=?, test_case_id=?, requirement_id=?, code=?, title=?, description=?,
+        severity=?, priority=?, status=?, steps_to_reproduce=?, expected_result=?, actual_result=?,
+        environment=?, updated_at=datetime('now') WHERE id=?`
+    ).run(execution_id || null, test_case_id || null, requirement_id || null, code, title, description,
+      severity, priority, status, steps_to_reproduce, expected_result, actual_result, environment, req.params.id);
+    res.json({ ok: true });
+  });
+
+  router.delete('/:id', (req, res) => {
+    db.prepare('DELETE FROM bugs WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // Retestes
+  router.post('/:id/retests', (req, res) => {
+    const { execution_id, result = 'Passou', notes = '', retest_date = null } = req.body || {};
+    const r = db.prepare('INSERT INTO bug_retests (bug_id, execution_id, result, notes, retest_date) VALUES (?,?,?,?,?)')
+      .run(req.params.id, execution_id || null, result, notes, retest_date || null);
+    if (result === 'Passou') {
+      db.prepare("UPDATE bugs SET status='Fechado', updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    } else if (result === 'Falhou') {
+      db.prepare("UPDATE bugs SET status='Em Correção', updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    }
+    res.json({ id: Number(r.lastInsertRowid) });
+  });
+
+  router.put('/retests/:rid', (req, res) => {
+    const { execution_id, result, notes } = req.body || {};
+    db.prepare('UPDATE bug_retests SET execution_id=?, result=?, notes=? WHERE id=?')
+      .run(execution_id || null, result, notes, req.params.rid);
+    res.json({ ok: true });
+  });
+
+  router.delete('/retests/:rid', (req, res) => {
+    db.prepare('DELETE FROM bug_retests WHERE id=?').run(req.params.rid);
+    res.json({ ok: true });
+  });
+
+  return router;
+};
