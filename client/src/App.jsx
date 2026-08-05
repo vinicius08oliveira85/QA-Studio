@@ -132,7 +132,6 @@ function Sidebar() {
           <label className="project-label">Tarefa</label>
           <div className="task-chip">
             <strong>{currentTask?.code || '…'}</strong>
-            <span className="muted">{currentTask?.title || 'Carregando…'}</span>
             {currentTask?.status && <Badge tone={toneFor(currentTask.status)}>{currentTask.status}</Badge>}
           </div>
           <button className="btn ghost small full" onClick={leaveTask}>← Tarefas</button>

@@ -101,17 +101,17 @@ body {
   background: rgba(255,255,255,.08); color: #fff; border-color: rgba(255,255,255,.12);
 }
 .task-chip {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 6px 8px; border-radius: 6px;
-  background: rgba(255,255,255,.06); margin-bottom: 6px;
-  color: #e8ecf4; font-size: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(79, 123, 255, .14);
+  border: 1px solid rgba(158, 197, 255, .22);
+  margin-bottom: 6px;
+  color: #e8ecf4;
 }
-.task-chip strong { font-size: 11px; letter-spacing: .03em; color: #9ec5ff; }
-.task-chip .muted {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; line-height: 1.3;
+.task-chip strong {
+  font-size: 12px; letter-spacing: .04em; color: #c9dcff; font-weight: 700;
 }
-.task-chip .badge { align-self: flex-start; margin-top: 2px; }
+.task-chip .badge { margin: 0; flex-shrink: 0; }
 
 .menu { flex: 1; padding: 6px 6px 12px; overflow-y: auto; min-height: 0; }
 .menu-section {
