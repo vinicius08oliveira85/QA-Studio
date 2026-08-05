@@ -65,6 +65,55 @@ Os dados ficam no arquivo local `data/qa.db` (SQLite). Uso pessoal, sem login.
 server/          API REST (Express + node:sqlite) e schema do banco
 server/routes/   Rotas por área (projetos, requisitos, casos, execuções, bugs, regressão...)
 client/          Frontend React (Vite)
+agent-runner/    CLI Playwright + agent (OpenCode/Cursor) com autofill de execuções
 scripts/         Testes de integração da API (scripts/test-api.js)
 data/            Banco SQLite local (criado automaticamente)
 ```
+
+## Execução com agent (Playwright / Postman + OpenCode/Cursor)
+
+Fluxo híbrido: a CLI (ou a UI) gera artefato a partir dos **passos + massa**, executa, pede ao agent para julgar e grava via `POST /api/executions`.
+
+| Tipo do caso | Artefato | Runner |
+|---|---|---|
+| Fumaça / Funcional | Playwright `.spec.ts` | Chromium |
+| API | Coleção Postman v2.1 | `fetch` nativo (sem Newman) |
+
+Specs/coleções úteis são copiadas para `agent-runner/specs/` (versionáveis). Cópias efêmeras ficam em `.generated/` (gitignored).
+
+### Pré-requisitos
+
+1. QA Studio rodando (`npm run dev` ou `npm start`) — API em `http://localhost:3001`
+2. Node deps do runner: `npm.cmd --prefix agent-runner install` (instala Chromium do Playwright)
+3. Agent configurado:
+   - **OpenCode** (padrão): CLI `opencode` no PATH
+   - **Cursor**: `CURSOR_API_KEY` e `@cursor/sdk`
+4. `agent-runner/.env` com `TARGET_BASE_URL` apontando para o app/API sob teste (veja `.env.example`)
+
+### Pela UI
+
+Nas abas **Fumaça**, **Funcional** ou **API**:
+
+- **Agent** na linha do caso — executa 1 caso
+- **Agent (N)** no header — fila todos os casos **Automatizado** da aba
+- No modal de execução manual: **Executar com agent**
+
+Status do job aparece no banner; ao terminar, o histórico atualiza (`tester` = `agent:opencode` ou `agent:cursor`).
+
+API usada pela UI: `POST /api/agent-runs` (`caseId` ou `taskId` + `type`) e `GET /api/agent-runs/:id`.
+
+### Pela CLI
+
+```bash
+# 1 caso
+npm.cmd run test:agent -- --caseId=22
+npm.cmd run test:agent -- --caseId=22 --agent=cursor
+# CI / sem janela:
+npm.cmd run test:agent -- --caseId=22 --headless
+
+# Fila da tarefa (só Automatizado; use --all-modes para incluir Manual)
+npm.cmd run test:agent -- --taskId=3 --type=Funcional
+npm.cmd run test:agent -- --taskId=3 --type=API
+```
+
+Artifacts (screenshots / logs) em `agent-runner/artifacts/`.

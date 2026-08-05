@@ -1,11 +1,11 @@
 export const BADGE_TONES = {
   // verdes (sucesso)
-  Passou: 'green', Fechado: 'green', Concluído: 'green', Homologado: 'green', Liberado: 'green',
+  Passou: 'green', Fechado: 'green', Concluído: 'green', Concluída: 'green', Homologado: 'green', Liberado: 'green',
   Ativo: 'green', Pronto: 'green', Implementado: 'green', Executado: 'green', Corrigido: 'green',
   'Não Reproduzido': 'gray',
   // âmbar (atenção / em andamento)
   'Média': 'amber', 'Em Andamento': 'amber', 'Em Correção': 'amber', 'Em Homologação': 'amber',
-  Pendente: 'amber', Aberto: 'amber', Sugerido: 'amber', 'Em Desenvolvimento': 'amber',
+  Pendente: 'amber', Aberto: 'amber', Aberta: 'amber', Sugerido: 'amber', 'Em Desenvolvimento': 'amber',
   'Em Análise': 'amber',
   // vermelho
   Blocker: 'red', Falhou: 'red', Bloqueado: 'red', 'Alta': 'red', 'Cancelado': 'gray',
@@ -15,6 +15,8 @@ export const BADGE_TONES = {
   Baixa: 'gray', Rascunho: 'gray', Rejeitado: 'gray', 'Não Executado': 'gray', Cancelada: 'gray',
   Arquivo: 'gray', 'Manual': 'gray'
 };
+
+export const TASK_STATUS = ['Aberta', 'Em Andamento', 'Em Homologação', 'Concluída', 'Cancelada'];
 
 export const toneFor = (status) => BADGE_TONES[status] || 'gray';
 

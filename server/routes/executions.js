@@ -4,7 +4,7 @@ module.exports = (db) => {
   const router = express.Router();
 
   router.get('/', (req, res) => {
-    const { projectId, testCaseId, result } = req.query;
+    const { projectId, taskId, testCaseId, result } = req.query;
     const params = [];
     let sql = `
       SELECT e.*,
@@ -14,8 +14,16 @@ module.exports = (db) => {
       FROM executions e
       JOIN test_cases tc ON tc.id = e.test_case_id
       LEFT JOIN requirements r ON r.id = tc.requirement_id
-      WHERE e.project_id = ?`;
-    params.push(projectId);
+      WHERE 1=1`;
+    if (taskId) {
+      sql += ' AND e.task_id = ?';
+      params.push(taskId);
+    } else if (projectId) {
+      sql += ' AND e.project_id = ?';
+      params.push(projectId);
+    } else {
+      return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
+    }
     if (testCaseId) { sql += ' AND e.test_case_id = ?'; params.push(testCaseId); }
     if (result) { sql += ' AND e.result = ?'; params.push(result); }
     sql += ' ORDER BY e.execution_date DESC, e.id DESC';
@@ -37,16 +45,28 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, test_case_id, environment = 'Homologação', tester = 'QA',
+    const { project_id, task_id, test_case_id, environment = 'Homologação', tester = 'QA',
       result = 'Passou', actual_result = '', notes = '', step_results = [] } = req.body || {};
-    if (!project_id || !test_case_id) return res.status(400).json({ error: 'Projeto e caso de teste são obrigatórios' });
+    if (!test_case_id) return res.status(400).json({ error: 'Caso de teste é obrigatório' });
+
+    const tc = db.prepare('SELECT * FROM test_cases WHERE id=?').get(test_case_id);
+    if (!tc) return res.status(404).json({ error: 'Caso de teste não encontrado' });
+
+    const resolvedTaskId = task_id || tc.task_id;
+    const resolvedProjectId = project_id || tc.project_id;
+    if (!resolvedTaskId) return res.status(400).json({ error: 'Tarefa é obrigatória' });
+
+    const task = db.resolveTask(resolvedTaskId);
+    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    if (Number(resolvedProjectId) !== Number(task.project_id)) {
+      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+    }
 
     const r = db.prepare(
-      `INSERT INTO executions (project_id, test_case_id, environment, tester, result, actual_result, notes) VALUES (?,?,?,?,?,?,?)`
-    ).run(project_id, test_case_id, environment, tester, result, actual_result, notes);
+      `INSERT INTO executions (project_id, task_id, test_case_id, environment, tester, result, actual_result, notes) VALUES (?,?,?,?,?,?,?,?)`
+    ).run(resolvedProjectId, resolvedTaskId, test_case_id, environment, tester, result, actual_result, notes);
     const execId = Number(r.lastInsertRowid);
 
-    const tc = db.prepare('SELECT steps FROM test_cases WHERE id=?').get(test_case_id);
     let steps = [];
     try { steps = JSON.parse(tc?.steps || '[]'); } catch { steps = []; }
     const norm = (s) => ({ order: Number(s.order ?? s.step_order) || 0, action: s.action || '', expected: s.expected || '' });

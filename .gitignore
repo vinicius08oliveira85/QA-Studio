@@ -1,5 +1,10 @@
 node_modules/
 data/
 client/dist/
+agent-runner/node_modules/
+agent-runner/.generated/
+agent-runner/artifacts/
+agent-runner/.env
 .freebuff/
 *.log
+.env

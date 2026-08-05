@@ -23,12 +23,18 @@ export const api = {
 
 export const fmtDate = (d) => {
   if (!d) return '';
-  const date = new Date(d.includes('T') ? d : d + (d.includes('T') ? '' : 'T00:00:00'));
+  const raw = String(d).trim();
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return raw;
   return date.toLocaleDateString('pt-BR') + ' ' + date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
 export const fmtDateShort = (d) => {
   if (!d) return '';
-  const date = new Date(d.includes('T') ? d : d + 'T00:00:00');
+  const raw = String(d).trim();
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
   return date.toLocaleDateString('pt-BR');
 };

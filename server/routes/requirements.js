@@ -11,14 +11,26 @@ module.exports = (db) => {
     FROM requirements r`;
 
   router.get('/', (req, res) => {
-    const { projectId } = req.query;
-    res.json(db.prepare(`${LIST_SQL} WHERE r.project_id = ? ORDER BY r.code`).all(projectId));
+    const { projectId, taskId } = req.query;
+    if (taskId) {
+      return res.json(db.prepare(`${LIST_SQL} WHERE r.task_id = ? ORDER BY r.code`).all(taskId));
+    }
+    if (projectId) {
+      return res.json(db.prepare(`${LIST_SQL} WHERE r.project_id = ? ORDER BY r.code`).all(projectId));
+    }
+    return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
   });
 
-  // Requisitos com regras de negócio (contexto para geração com IA)
   router.get('/context', (req, res) => {
-    const { projectId } = req.query;
-    const rows = db.prepare('SELECT * FROM requirements WHERE project_id = ? ORDER BY code').all(projectId);
+    const { projectId, taskId } = req.query;
+    let rows;
+    if (taskId) {
+      rows = db.prepare('SELECT * FROM requirements WHERE task_id = ? ORDER BY code').all(taskId);
+    } else if (projectId) {
+      rows = db.prepare('SELECT * FROM requirements WHERE project_id = ? ORDER BY code').all(projectId);
+    } else {
+      return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
+    }
     for (const r of rows) {
       r.business_rules = db.prepare('SELECT rule, category FROM business_rules WHERE requirement_id = ? ORDER BY id').all(r.id);
     }
@@ -34,12 +46,18 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, code, title, description = '', priority = 'Média', status = 'Ativo', module = '', source = 'manual' } = req.body || {};
-    if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
-    const c = code || db.nextCode('requirements', 'REQ', project_id);
+    const { project_id, task_id, code, title, description = '', priority = 'Média', status = 'Ativo', module = '', source = 'manual' } = req.body || {};
+    if (!task_id || !title) return res.status(400).json({ error: 'Tarefa e título são obrigatórios' });
+    const task = db.resolveTask(task_id);
+    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const projectId = project_id || task.project_id;
+    if (Number(projectId) !== Number(task.project_id)) {
+      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+    }
+    const c = code || db.nextCode('requirements', 'REQ', projectId);
     const r = db.prepare(
-      'INSERT INTO requirements (project_id, code, title, description, priority, status, module, source) VALUES (?,?,?,?,?,?,?,?)'
-    ).run(project_id, c, title, description, priority, status, module, source);
+      'INSERT INTO requirements (project_id, task_id, code, title, description, priority, status, module, source) VALUES (?,?,?,?,?,?,?,?,?)'
+    ).run(projectId, task_id, c, title, description, priority, status, module, source);
     res.json({ id: Number(r.lastInsertRowid), code: c });
   });
 
@@ -66,7 +84,6 @@ module.exports = (db) => {
     res.json({ ok: true });
   });
 
-  // Regras de negócio vinculadas ao requisito
   router.post('/:id/business-rules', (req, res) => {
     const { rule, category = 'Regra de Negócio', source = 'manual' } = req.body || {};
     if (!rule) return res.status(400).json({ error: 'Regra é obrigatória' });

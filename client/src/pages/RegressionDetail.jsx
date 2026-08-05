@@ -67,7 +67,6 @@ export default function RegressionDetail() {
     <div>
       <Header
         title={run.name}
-        subtitle={`Ambiente: ${run.environment} | ${run.notes || ''}`}
         actions={
           <>
             <Btn className="ghost small" onClick={() => navigate('/regressao')}>Voltar</Btn>
@@ -77,6 +76,11 @@ export default function RegressionDetail() {
           </>
         }
       />
+      {(run.environment || run.notes) && (
+        <div className="muted small mb" style={{ marginTop: -8 }}>
+          {[run.environment && `Ambiente: ${run.environment}`, run.notes].filter(Boolean).join(' · ')}
+        </div>
+      )}
 
       <div className="panel">
         <div className="inline-stats">

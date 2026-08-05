@@ -16,11 +16,29 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 -- ---------------------------------------------------------------
+-- Tarefas (tickets de desenvolvimento dentro do projeto)
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tasks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  code        TEXT NOT NULL,                 -- TAR-001
+  title       TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  status      TEXT DEFAULT 'Aberta',          -- Aberta | Em Andamento | Em Homologação | Concluída | Cancelada
+  priority    TEXT DEFAULT 'Média',           -- Alta | Média | Baixa
+  assignee    TEXT DEFAULT '',
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE(project_id, code)
+);
+
+-- ---------------------------------------------------------------
 -- 1. Análise de Requisitos e Planejamento
 -- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS requirements (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   code        TEXT NOT NULL,
   title       TEXT NOT NULL,
   description TEXT DEFAULT '',
@@ -45,6 +63,7 @@ CREATE TABLE IF NOT EXISTS business_rules (
 CREATE TABLE IF NOT EXISTS test_strategies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id     INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id        INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
   name           TEXT NOT NULL,
   description    TEXT DEFAULT '',
@@ -64,6 +83,7 @@ CREATE TABLE IF NOT EXISTS test_strategies (
 CREATE TABLE IF NOT EXISTS test_scenarios (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id     INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id        INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
   title          TEXT NOT NULL,
   description    TEXT DEFAULT '',
@@ -76,6 +96,7 @@ CREATE TABLE IF NOT EXISTS test_scenarios (
 CREATE TABLE IF NOT EXISTS test_cases (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id            INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   scenario_id        INTEGER REFERENCES test_scenarios(id) ON DELETE SET NULL,
   requirement_id     INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
   strategy_id        INTEGER REFERENCES test_strategies(id) ON DELETE SET NULL,
@@ -112,6 +133,7 @@ CREATE TABLE IF NOT EXISTS test_mass (
 CREATE TABLE IF NOT EXISTS executions (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id       INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   test_case_id  INTEGER NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
   execution_date TEXT DEFAULT (datetime('now')),
   environment   TEXT DEFAULT 'Homologação',
@@ -138,6 +160,7 @@ CREATE TABLE IF NOT EXISTS execution_steps (
 CREATE TABLE IF NOT EXISTS bugs (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id            INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   execution_id       INTEGER REFERENCES executions(id) ON DELETE SET NULL,
   test_case_id       INTEGER REFERENCES test_cases(id) ON DELETE SET NULL,
   requirement_id     INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
@@ -230,6 +253,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- Índices de integração
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id);
 CREATE INDEX IF NOT EXISTS idx_rules_req ON business_rules(requirement_id);
 CREATE INDEX IF NOT EXISTS idx_scenarios_project ON test_scenarios(project_id);

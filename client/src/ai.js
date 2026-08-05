@@ -188,7 +188,42 @@ ${schemaScope(scope)}
 
 const REQ_STATUS = ['Ativo', 'Em Análise', 'Homologado', 'Cancelado'];
 
-export async function applyResult(result, { projectId, scope, existing = {}, selectedReqIds = [] }) {
+async function deleteAll(path, taskId) {
+  if (!taskId) return;
+  const rows = await api.get(`${path}?taskId=${taskId}`);
+  for (const row of rows || []) {
+    await api.del(`${path}/${row.id}`);
+  }
+}
+
+/** Remove artefatos da tarefa conforme o escopo, antes de reaplicar a geração. */
+export async function clearTaskScope(taskId, scope) {
+  if (!taskId) return;
+  if (scope === 'casos') {
+    await deleteAll('/test-cases', taskId);
+    return;
+  }
+  if (scope === 'cenarios') {
+    await deleteAll('/scenarios', taskId);
+    return;
+  }
+  if (scope === 'estrategias') {
+    await deleteAll('/strategies', taskId);
+    return;
+  }
+  if (scope === 'requisitos') {
+    await deleteAll('/requirements', taskId);
+    return;
+  }
+  if (scope === 'completo') {
+    await deleteAll('/test-cases', taskId);
+    await deleteAll('/scenarios', taskId);
+    await deleteAll('/strategies', taskId);
+    await deleteAll('/requirements', taskId);
+  }
+}
+
+export async function applyResult(result, { projectId, taskId, scope, existing = {}, selectedReqIds = [], mode = 'replace' }) {
   const summary = { requirements: 0, rules: 0, strategies: 0, scenarios: 0, cases: 0, mass: 0, steps: 0 };
   const selectedReqs = selectReqs(existing, selectedReqIds);
   const reqIdByIndex = [];
@@ -230,10 +265,15 @@ export async function applyResult(result, { projectId, scope, existing = {}, sel
     return summary;
   }
 
+  if (mode === 'replace' && scope !== 'completar') {
+    await clearTaskScope(taskId, scope);
+  }
+
   for (const r of result.requirements || []) {
     if (!r?.title) continue;
     const created = await api.post('/requirements', {
       project_id: projectId,
+      task_id: taskId,
       code: r.code || '',
       title: r.title,
       description: r.description || '',
@@ -260,6 +300,7 @@ export async function applyResult(result, { projectId, scope, existing = {}, sel
       if (!rid) continue;
       const created = await api.post('/strategies', {
         project_id: projectId,
+        task_id: taskId,
         requirement_id: rid,
         name: st.name || (reqObj ? `Estratégia de teste - ${reqObj.code}` : 'Estratégia de teste'),
         description: st.description || '',
@@ -283,6 +324,7 @@ export async function applyResult(result, { projectId, scope, existing = {}, sel
       else rid = reqIdByIndex[Number(sc.requirement_id)] || null;
       const created = await api.post('/scenarios', {
         project_id: projectId,
+        task_id: taskId,
         requirement_id: rid,
         title: sc.title,
         description: sc.description || '',
@@ -316,6 +358,7 @@ export async function applyResult(result, { projectId, scope, existing = {}, sel
         .map((s, i) => ({ order: Number(s.order) || i + 1, action: s.action, expected: s.expected || '' }));
       const created = await api.post('/test-cases', {
         project_id: projectId,
+        task_id: taskId,
         scenario_id: scId,
         requirement_id: rid,
         strategy_id: strategyFor(rid),

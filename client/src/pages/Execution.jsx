@@ -1,30 +1,37 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import AgentChat from '../components/AgentChat.jsx';
 import { EXEC_RESULTS, toneFor } from '../utils.js';
 
-const TYPE_LABEL = { 'Fumaça': 'Teste de Fumaça', 'Funcional': 'Teste Funcional (Manual/Automatizado)', 'API': 'Teste de API' };
+const TYPE_LABEL = { 'Fumaça': 'Fumaça', 'Funcional': 'Funcional', 'API': 'API' };
+const AGENT_TYPES = new Set(['Fumaça', 'Funcional', 'API']);
 
 export default function Execution({ type }) {
-  const { current } = useApp();
+  const { current, taskId } = useApp();
   const [params, setParams] = useSearchParams();
 
   const { items: cases, loading, refresh } = useList(React.useCallback(
-    () => api.get(`/test-cases?projectId=${current.id}&type=${encodeURIComponent(type)}`), [current.id, type]
+    () => api.get(`/test-cases?taskId=${taskId}&type=${encodeURIComponent(type)}`), [taskId, type]
   ));
   const { items: execs, refresh: refreshExecs } = useList(React.useCallback(
-    () => api.get('/executions?projectId=' + current.id), [current.id]
+    () => api.get('/executions?taskId=' + taskId), [taskId]
   ));
 
-  const [target, setTarget] = useState(null);       // caso em execução
+  const [target, setTarget] = useState(null);
   const [execForm, setExecForm] = useState(null);
-  const [viewing, setViewing] = useState(null);     // detalhe de execução
-  const [bugForm, setBugForm] = useState(null);     // modal de reportar bug
+  const [viewing, setViewing] = useState(null);
+  const [bugForm, setBugForm] = useState(null);
+  const [agentJob, setAgentJob] = useState(null);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const caseIds = new Set(cases.map((c) => c.id));
   const history = execs.filter((e) => caseIds.has(e.test_case_id));
+  const automatedCount = cases.filter((c) => c.execution_mode === 'Automatizado').length;
+  const canAgent = AGENT_TYPES.has(type);
 
   const openExecute = async (tc) => {
     const d = await api.get('/test-cases/' + tc.id);
@@ -33,6 +40,58 @@ export default function Execution({ type }) {
       environment: 'Homologação', tester: 'QA', result: 'Passou', actual_result: '', notes: '',
       step_results: d.steps.map((s) => ({ order: s.order, actual: '', result: 'Passou' }))
     });
+  };
+
+  const pollAgentJob = (jobId) => {
+    const tick = async () => {
+      try {
+        const job = await api.get('/agent-runs/' + jobId);
+        setAgentJob(job);
+        if (job.status === 'queued' || job.status === 'running') {
+          setTimeout(tick, 1000);
+          return;
+        }
+        setAgentBusy(false);
+        refresh();
+        refreshExecs();
+      } catch {
+        setAgentBusy(false);
+        setAgentJob((j) => j ? { ...j, status: 'error', error: 'Falha ao consultar status' } : j);
+      }
+    };
+    setTimeout(tick, 800);
+  };
+
+  const startAgent = async (body) => {
+    if (agentBusy) return;
+    setAgentBusy(true);
+    setAgentJob(null);
+    setChatOpen(true);
+    try {
+      const job = await api.post('/agent-runs', body);
+      setAgentJob(job);
+      pollAgentJob(job.id);
+    } catch (err) {
+      setAgentBusy(false);
+      setAgentJob({ status: 'error', error: err.message || 'Falha ao iniciar agent', log: err.message });
+    }
+  };
+
+  const continueSso = async () => {
+    if (!agentJob?.id) return;
+    try {
+      await api.post(`/agent-runs/${agentJob.id}/continue`, {});
+      setAgentJob((j) => j ? {
+        ...j,
+        waitingSso: false,
+        log: (j.log || '') + '[Studio] Você confirmou o login — retomando…\n'
+      } : j);
+    } catch (err) {
+      setAgentJob((j) => j ? {
+        ...j,
+        log: (j.log || '') + `[Studio] Erro ao continuar: ${err.message}\n`
+      } : j);
+    }
   };
 
   React.useEffect(() => {
@@ -58,7 +117,7 @@ export default function Execution({ type }) {
 
   const submit = async () => {
     const r = await api.post('/executions', {
-      project_id: current.id, test_case_id: target.id,
+      project_id: current.id, task_id: taskId, test_case_id: target.id,
       environment: execForm.environment, tester: execForm.tester, result: execForm.result,
       actual_result: execForm.actual_result, notes: execForm.notes, step_results: execForm.step_results
     });
@@ -89,7 +148,7 @@ export default function Execution({ type }) {
   };
 
   const submitBug = async () => {
-    await api.post('/bugs', { ...bugForm, project_id: current.id });
+    await api.post('/bugs', { ...bugForm, project_id: current.id, task_id: taskId });
     setBugForm(null);
     refreshExecs();
   };
@@ -98,9 +157,31 @@ export default function Execution({ type }) {
     <div>
       <Header
         title={TYPE_LABEL[type]}
-        subtitle="Lista de casos de teste para execução e o histórico de resultados."
-        actions={<div className="muted small">{cases.length} caso(s) de teste</div>}
+        actions={
+          <div className="row-actions">
+            <div className="muted small">{cases.length} caso(s)</div>
+            {canAgent && (
+              <Btn
+                className="small"
+                disabled={agentBusy || automatedCount === 0}
+                title={automatedCount === 0 ? 'Nenhum caso Automatizado nesta aba' : 'Fila agent dos casos Automatizado'}
+                onClick={() => startAgent({ taskId: Number(taskId), type, headed: true })}
+              >
+                {agentBusy ? 'Agent…' : `Agent (${automatedCount})`}
+              </Btn>
+            )}
+          </div>
+        }
       />
+
+      {chatOpen && agentJob && (
+        <AgentChat
+          job={agentJob}
+          busy={agentBusy}
+          onContinue={continueSso}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
 
       {loading ? <Loading /> : (
         <div className="table-wrap mb">
@@ -118,7 +199,20 @@ export default function Execution({ type }) {
                       <td><Badge tone={tc.execution_mode === 'Automatizado' ? 'blue' : 'gray'}>{tc.execution_mode}</Badge></td>
                       <td><Badge tone={toneFor(tc.status)}>{tc.status}</Badge></td>
                       <td>{last ? <Badge tone={toneFor(last.result)}>{last.result}</Badge> : '-'}</td>
-                      <td><Btn className="small" onClick={() => openExecute(tc)}>Executar</Btn></td>
+                      <td>
+                        <div className="row-actions">
+                          <Btn className="small" onClick={() => openExecute(tc)}>Executar</Btn>
+                          {canAgent && (
+                            <Btn
+                              className="ghost small"
+                              disabled={agentBusy}
+                              onClick={() => startAgent({ caseId: tc.id, headed: true })}
+                            >
+                              Agent
+                            </Btn>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -200,6 +294,11 @@ export default function Execution({ type }) {
 
             <div className="modal-foot-inline">
               <Btn className="gray" onClick={() => { setTarget(null); setExecForm(null); }}>Cancelar</Btn>
+              {canAgent && (
+                <Btn className="ghost" disabled={agentBusy} onClick={() => { const id = target.id; setTarget(null); setExecForm(null); startAgent({ caseId: id, headed: true }); }}>
+                  Executar com agent
+                </Btn>
+              )}
               <Btn onClick={submit}>Registrar execução</Btn>
             </div>
           </>

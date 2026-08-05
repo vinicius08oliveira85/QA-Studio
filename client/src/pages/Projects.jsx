@@ -34,7 +34,6 @@ export default function Projects() {
     <div>
       <Header
         title="Projetos"
-        subtitle="Cada projeto reúne requisitos, casos de teste, execuções, bugs e releases."
         actions={<Btn onClick={openCreate}>Novo projeto</Btn>}
       />
 

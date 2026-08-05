@@ -16,10 +16,18 @@ module.exports = (db) => {
     LEFT JOIN test_strategies st ON st.id = tc.strategy_id`;
 
   router.get('/', (req, res) => {
-    const { projectId, type, status, requirementId, scenarioId, regression } = req.query;
+    const { projectId, taskId, type, status, requirementId, scenarioId, regression } = req.query;
     const params = [];
-    let sql = `${LIST_SQL} WHERE tc.project_id = ?`;
-    params.push(projectId);
+    let sql = `${LIST_SQL} WHERE 1=1`;
+    if (taskId) {
+      sql += ' AND tc.task_id = ?';
+      params.push(taskId);
+    } else if (projectId) {
+      sql += ' AND tc.project_id = ?';
+      params.push(projectId);
+    } else {
+      return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
+    }
     if (type) { sql += ' AND tc.type = ?'; params.push(type); }
     if (status) { sql += ' AND tc.status = ?'; params.push(status); }
     if (requirementId) { sql += ' AND tc.requirement_id = ?'; params.push(requirementId); }
@@ -42,15 +50,21 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, scenario_id, requirement_id, strategy_id, code, title,
+    const { project_id, task_id, scenario_id, requirement_id, strategy_id, code, title,
       priority = 'Média', type = 'Funcional', execution_mode = 'Manual', status = 'Pronto',
       preconditions = '', steps = [], regression_relevant = 0, automated = 0, automation_tool = '', source = 'manual' } = req.body || {};
-    if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
-    const c = code || db.nextCode('test_cases', 'TC', project_id);
+    if (!task_id || !title) return res.status(400).json({ error: 'Tarefa e título são obrigatórios' });
+    const task = db.resolveTask(task_id);
+    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const projectId = project_id || task.project_id;
+    if (Number(projectId) !== Number(task.project_id)) {
+      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+    }
+    const c = code || db.nextCode('test_cases', 'TC', projectId);
     const r = db.prepare(
-      `INSERT INTO test_cases (project_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps, regression_relevant, automated, automation_tool, source)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(project_id, scenario_id || null, requirement_id || null, strategy_id || null, c, title,
+      `INSERT INTO test_cases (project_id, task_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps, regression_relevant, automated, automation_tool, source)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(projectId, task_id, scenario_id || null, requirement_id || null, strategy_id || null, c, title,
       priority, type, execution_mode, status, preconditions, JSON.stringify(steps || []),
       regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '', source);
     res.json({ id: Number(r.lastInsertRowid), code: c });
@@ -85,18 +99,17 @@ module.exports = (db) => {
     try { steps = JSON.parse(orig.steps || '[]'); } catch { steps = []; }
     const c = db.nextCode('test_cases', 'TC', orig.project_id);
     const r = db.prepare(
-      `INSERT INTO test_cases (project_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(orig.project_id, orig.scenario_id, orig.requirement_id, orig.strategy_id, c,
+      `INSERT INTO test_cases (project_id, task_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(orig.project_id, orig.task_id, orig.scenario_id, orig.requirement_id, orig.strategy_id, c,
       `${orig.title} (cópia)`, orig.priority, orig.type, orig.execution_mode, 'Pronto', orig.preconditions, JSON.stringify(steps));
     res.json({ id: Number(r.lastInsertRowid), code: c });
   });
 
-  // Massa de teste
-  // Massa de teste (visão global do projeto)
   router.get('/mass/all', (req, res) => {
-    const { projectId } = req.query;
-    res.json(db.prepare(`
+    const { projectId, taskId } = req.query;
+    const params = [];
+    let sql = `
       SELECT tm.id, tm.name, tm.data, tm.purpose, tm.created_at,
         tc.id AS test_case_id, tc.code AS test_case_code, tc.title AS test_case_title,
         tc.type AS test_case_type,
@@ -104,9 +117,18 @@ module.exports = (db) => {
       FROM test_mass tm
       JOIN test_cases tc ON tc.id = tm.test_case_id
       LEFT JOIN requirements r ON r.id = tc.requirement_id
-      WHERE tc.project_id = ?
-      ORDER BY tc.code, tm.name
-    `).all(projectId));
+      WHERE 1=1`;
+    if (taskId) {
+      sql += ' AND tc.task_id = ?';
+      params.push(taskId);
+    } else if (projectId) {
+      sql += ' AND tc.project_id = ?';
+      params.push(projectId);
+    } else {
+      return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
+    }
+    sql += ' ORDER BY tc.code, tm.name';
+    res.json(db.prepare(sql).all(...params));
   });
 
   router.post('/:id/test-mass', (req, res) => {

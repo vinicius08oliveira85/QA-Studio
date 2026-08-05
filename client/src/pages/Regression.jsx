@@ -36,8 +36,7 @@ export default function Regression() {
   return (
     <div>
       <Header
-        title="Rodar Regressão"
-        subtitle="Monte o pacote de regressão, marque o resultado de cada caso e valide que nada quebrou."
+        title="Regressão"
         actions={<Btn onClick={() => setCreating(true)}>Nova regressão</Btn>}
       />
 

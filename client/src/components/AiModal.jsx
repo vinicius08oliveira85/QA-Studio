@@ -23,8 +23,14 @@ async function copyText(text) {
   }
 }
 
+function taskPrefill(task) {
+  if (!task) return { title: '', description: '' };
+  const title = [task.code, task.title].filter(Boolean).join(' — ');
+  return { title, description: task.description || '' };
+}
+
 export default function AiModal({ open, onClose, initialScope = 'completo', onApplied }) {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -40,15 +46,27 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
 
   useEffect(() => {
     if (!open) return;
-    setTitle(''); setDescription(''); setScope(initialScope); setResponseText('');
-    setError(''); setSuccess(''); setCopied(''); setSelReq([]);
+    const pre = taskPrefill(currentTask);
+    setTitle(pre.title);
+    setDescription(pre.description);
+    setScope(initialScope);
+    setResponseText('');
+    setError('');
+    setSuccess('');
+    setCopied('');
+    setSelReq([]);
+    if (!taskId) {
+      setError('Abra uma tarefa primeiro para gerar conteúdo com IA.');
+      setExisting({});
+      return;
+    }
     (async () => {
       try {
         const [reqs, scen, tcs, strats] = await Promise.all([
-          api.get('/requirements/context?projectId=' + current.id),
-          api.get('/scenarios?projectId=' + current.id),
-          api.get('/test-cases?projectId=' + current.id),
-          api.get('/strategies?projectId=' + current.id)
+          api.get('/requirements/context?taskId=' + taskId),
+          api.get('/scenarios?taskId=' + taskId),
+          api.get('/test-cases?taskId=' + taskId),
+          api.get('/strategies?taskId=' + taskId)
         ]);
         setExisting({
           reqList: reqs.map((r) => ({
@@ -64,7 +82,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
         });
       } catch { /* segue */ }
     })();
-  }, [open, initialScope, current.id]);
+  }, [open, initialScope, taskId, currentTask]);
 
   const selReqs = useMemo(
     () => selReq.length === 0
@@ -103,9 +121,11 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
   const preview = countPreview();
 
   const contextScopes = ['completar', 'estrategias', 'cenarios', 'casos'];
+  const replacesSection = scope !== 'completar';
   const canGenerate = contextScopes.includes(scope) ? selReqs.length > 0 : (title.trim() || description.trim());
 
   const generate = async () => {
+    if (!taskId) { setError('Abra uma tarefa primeiro para gerar conteúdo com IA.'); return; }
     setError(''); setSuccess('');
     setLoading(true);
     try {
@@ -120,10 +140,22 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
   };
 
   const apply = async () => {
+    if (!taskId) { setError('Abra uma tarefa primeiro para aplicar o conteúdo.'); return; }
     if (!parsed) { setError('Resposta da IA inválida: não contém JSON estruturado.'); return; }
+    if (replacesSection) {
+      const ok = window.confirm('Isso substituirá o conteúdo desta seção na tarefa. Continuar?');
+      if (!ok) return;
+    }
     setError(''); setApplying(true);
     try {
-      const summary = await applyResult(parsed, { projectId: current.id, scope, existing, selectedReqIds: selReq });
+      const summary = await applyResult(parsed, {
+        projectId: current.id,
+        taskId,
+        scope,
+        existing,
+        selectedReqIds: selReq,
+        mode: replacesSection ? 'replace' : 'append'
+      });
       setSuccess(
         `Aplicado: ${summary.requirements} requisito(s), ${summary.rules} regra(s), ${summary.strategies} estratégia(s), ${summary.scenarios} cenário(s), ${summary.cases} caso(s) (${summary.steps} passos), ${summary.mass} massa(s).`
       );
@@ -161,9 +193,10 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
       <div className="highlight">
         {scope === 'completar'
           ? <>A IA completa os <strong>requisitos selecionados</strong>: define módulo, prioridade, status, refina a descrição e gera as regras de negócio (substituindo as existentes).</>
-          : scope === 'estrategias'
-            ? <>A IA analisa os <strong>requisitos selecionados</strong> (código, descrição e regras de negócio) e gera <strong>uma estratégia de teste por requisito</strong>.</>
-            : <>Descreva a funcionalidade e a IA gera todo o conteúdo estruturado (PT-BR). Use <strong>Gerar com IA</strong> (chave Gemini) ou <strong>Copiar prompt</strong> para usar uma IA externa e colar a resposta abaixo.</>}
+          : <>
+              Descreva a funcionalidade e a IA gera o conteúdo estruturado (PT-BR). Ao aplicar, o conteúdo atual desta seção na tarefa será <strong>substituído</strong>.
+              Use <strong>Gerar com IA</strong> (chave Gemini) ou <strong>Copiar prompt</strong> para usar uma IA externa e colar a resposta abaixo.
+            </>}
       </div>
 
       <div className="grid2">
@@ -184,7 +217,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
       {(scope === 'estrategias' || scope === 'cenarios' || scope === 'casos' || scope === 'completar') && (
         <Field label={`${scope === 'completar' ? 'Requisitos a completar' : 'Requisitos de contexto'} (${selReq.length === 0 ? 'todos' : selReq.length + ' de ' + (existing.reqList || []).length})`}>
           <div className="check-list">
-            {(existing.reqList || []).length === 0 && <span className="muted small">Nenhum requisito cadastrado neste projeto.</span>}
+            {(existing.reqList || []).length === 0 && <span className="muted small">Nenhum requisito cadastrado nesta tarefa.</span>}
             {(existing.reqList || []).map((r) => {
               const checked = selReq.length === 0 || selReq.includes(Number(r.id));
               return (
@@ -231,7 +264,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
 
       {preview && (
         <div className="panel mt">
-          <h2 style={{ margin: 0 }}>Preview do que será criado</h2>
+          <h2 style={{ margin: 0 }}>{replacesSection ? 'Preview do que substituirá esta seção' : 'Preview do que será aplicado'}</h2>
           <div className="inline-stats">
             {preview.strategies > 0 && <div className="stat-chip"><div className="v">{preview.strategies}</div><div className="k">Estratégias</div></div>}
             {preview.requirements > 0 && <div className="stat-chip"><div className="v">{preview.requirements}</div><div className="k">{scope === 'completar' ? 'Requisitos a completar' : 'Requisitos'}</div></div>}

@@ -4,15 +4,20 @@ module.exports = (db) => {
   const router = express.Router();
 
   router.get('/', (req, res) => {
-    const { projectId } = req.query;
-    res.json(db.prepare(`
+    const { projectId, taskId } = req.query;
+    const base = `
       SELECT s.*,
         r.code AS requirement_code, r.title AS requirement_title,
         (SELECT COUNT(*) FROM test_cases tc WHERE tc.strategy_id = s.id) AS cases_count
       FROM test_strategies s
-      LEFT JOIN requirements r ON r.id = s.requirement_id
-      WHERE s.project_id = ? ORDER BY s.name
-    `).all(projectId));
+      LEFT JOIN requirements r ON r.id = s.requirement_id`;
+    if (taskId) {
+      return res.json(db.prepare(`${base} WHERE s.task_id = ? ORDER BY s.name`).all(taskId));
+    }
+    if (projectId) {
+      return res.json(db.prepare(`${base} WHERE s.project_id = ? ORDER BY s.name`).all(projectId));
+    }
+    return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
   });
 
   router.get('/:id', (req, res) => {
@@ -29,11 +34,17 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, requirement_id, name, description = '', approach = '', risk_scope = '', entry_criteria = '', exit_criteria = '', status = 'Ativo', source = 'manual' } = req.body || {};
-    if (!project_id || !name) return res.status(400).json({ error: 'Projeto e nome são obrigatórios' });
+    const { project_id, task_id, requirement_id, name, description = '', approach = '', risk_scope = '', entry_criteria = '', exit_criteria = '', status = 'Ativo', source = 'manual' } = req.body || {};
+    if (!task_id || !name) return res.status(400).json({ error: 'Tarefa e nome são obrigatórios' });
+    const task = db.resolveTask(task_id);
+    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const projectId = project_id || task.project_id;
+    if (Number(projectId) !== Number(task.project_id)) {
+      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+    }
     const r = db.prepare(
-      'INSERT INTO test_strategies (project_id, requirement_id, name, description, approach, risk_scope, entry_criteria, exit_criteria, status, source) VALUES (?,?,?,?,?,?,?,?,?,?)'
-    ).run(project_id, requirement_id || null, name, description, approach, risk_scope, entry_criteria, exit_criteria, status, source);
+      'INSERT INTO test_strategies (project_id, task_id, requirement_id, name, description, approach, risk_scope, entry_criteria, exit_criteria, status, source) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+    ).run(projectId, task_id, requirement_id || null, name, description, approach, risk_scope, entry_criteria, exit_criteria, status, source);
     res.json({ id: Number(r.lastInsertRowid) });
   });
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
@@ -11,9 +11,9 @@ const blank = {
 };
 
 export default function Bugs() {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const { items, loading, refresh } = useList(React.useCallback(
-    () => api.get('/bugs?projectId=' + current.id), [current.id]
+    () => api.get('/bugs?taskId=' + taskId), [taskId]
   ));
   const [reqs, setReqs] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -26,8 +26,8 @@ export default function Bugs() {
   const [fSeverity, setFSeverity] = useState('');
 
   React.useEffect(() => {
-    if (current.id) api.get('/requirements?projectId=' + current.id).then(setReqs).catch(() => {});
-  }, [current.id]);
+    if (taskId) api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
+  }, [taskId]);
 
   const filtered = items.filter((b) => {
     const t = `${b.code} ${b.title} ${b.test_case_code}`.toLowerCase();
@@ -45,7 +45,7 @@ export default function Bugs() {
   const save = async () => {
     if (!form.title.trim()) return;
     if (editing) await api.put('/bugs/' + editing.id, form);
-    else await api.post('/bugs', { ...form, project_id: current.id });
+    else await api.post('/bugs', { ...form, project_id: current.id, task_id: taskId });
     refresh();
     setCreating(false); setEditing(null);
   };
@@ -85,8 +85,7 @@ export default function Bugs() {
   return (
     <div>
       <Header
-        title="Documentar Bug"
-        subtitle="Registre, acompanhe e feche bugs. Bugs podem ser criados a partir de execuções falhas."
+        title="Bugs"
         actions={<Btn onClick={openCreate}>Novo bug</Btn>}
       />
 
@@ -117,7 +116,7 @@ export default function Bugs() {
                 {filtered.map((b) => (
                   <tr key={b.id}>
                     <td className="cell-title">{b.code}</td>
-                    <td className="cell-title">{b.title}<div className="cell-sub">{b.test_case_code ? `Caso ${b.test_case_code}` : b.requirement_code || ''}</div></td>
+                    <td className="cell-title">{b.title}</td>
                     <td>{b.test_case_code || '-'}</td>
                     <td><Badge tone={toneFor(b.severity)}>{b.severity}</Badge></td>
                     <td><Badge tone={toneFor(b.status)}>{b.status}</Badge></td>

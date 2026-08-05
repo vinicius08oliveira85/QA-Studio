@@ -44,8 +44,7 @@ export default function ReleaseDetail() {
   return (
     <div>
       <Header
-        title={`${rel.name} ${rel.version ? `(v${rel.version})` : ''}`}
-        subtitle={rel.notes || 'Homologação e liberação'}
+        title={`${rel.name}${rel.version ? ` (v${rel.version})` : ''}`}
         actions={
           <>
             <Btn className="ghost small" onClick={() => navigate('/homologacao')}>Voltar</Btn>
@@ -55,6 +54,7 @@ export default function ReleaseDetail() {
           </>
         }
       />
+      {rel.notes && <div className="muted small mb" style={{ marginTop: -8 }}>{rel.notes}</div>}
 
       <div className="panel">
         <div className="inline-stats">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
@@ -6,9 +6,9 @@ import AiModal from '../components/AiModal.jsx';
 import { PRIORITIES, REQUIREMENT_STATUS, toneFor } from '../utils.js';
 
 export default function Requirements() {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const { items, loading, refresh } = useList(React.useCallback(
-    () => api.get('/requirements?projectId=' + current.id), [current.id]
+    () => api.get('/requirements?taskId=' + taskId), [taskId]
   ));
 
   const [aiOpen, setAiOpen] = useState(false);
@@ -45,7 +45,7 @@ export default function Requirements() {
   const save = async () => {
     if (!form.title.trim()) return;
     if (editing) await api.put('/requirements/' + editing.id, form);
-    else await api.post('/requirements', { ...form, project_id: current.id });
+    else await api.post('/requirements', { ...form, project_id: current.id, task_id: taskId });
     refresh();
     setCreating(false); setEditing(null);
   };
@@ -78,8 +78,7 @@ export default function Requirements() {
   return (
     <div>
       <Header
-        title="Requisitos e Regras de Negócio"
-        subtitle="Documente o que deve ser implementado e as regras que precisam ser validadas pelos testes."
+        title="Requisitos"
         actions={<>
           <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
           <Btn className="ghost" onClick={() => setAiCompleteOpen(true)}>Completar com IA</Btn>
@@ -109,7 +108,7 @@ export default function Requirements() {
         <div className="table-wrap">
           {filtered.length === 0 ? <Empty>Nenhum requisito encontrado.</Empty> : (
             <table className="table">
-              <thead><tr><th>Código</th><th>Título</th><th>Módulo</th><th>Prioridade</th><th>Status</th><th>Regras</th><th>Casos</th><th>Pendências</th><th /></tr></thead>
+              <thead><tr><th>Código</th><th>Título</th><th>Módulo</th><th>Prioridade</th><th>Status</th><th>Regras</th><th>Cenários</th><th>Casos</th><th /></tr></thead>
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id}>
@@ -119,14 +118,8 @@ export default function Requirements() {
                     <td><Badge tone={toneFor(r.priority)}>{r.priority}</Badge></td>
                     <td><Badge tone={toneFor(r.status)}>{r.status}</Badge></td>
                     <td>{r.rules_count}</td>
+                    <td>{r.scenarios_count}</td>
                     <td>{r.cases_count}</td>
-                    <td>
-                      <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
-                        {r.rules_count === 0 && <Badge tone="amber">sem regras</Badge>}
-                        {r.scenarios_count === 0 && <Badge tone="amber">sem cenários</Badge>}
-                        {r.rules_count > 0 && r.scenarios_count > 0 && <Badge tone="green">completo</Badge>}
-                      </div>
-                    </td>
                     <td>
                       <div className="row-actions">
                         <Btn className="ghost small" onClick={() => loadDetail(r.id)}>Detalhes</Btn>

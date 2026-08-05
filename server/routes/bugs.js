@@ -15,10 +15,18 @@ module.exports = (db) => {
     LEFT JOIN requirements r ON r.id = COALESCE(b.requirement_id, tc.requirement_id)`;
 
   router.get('/', (req, res) => {
-    const { projectId, status, severity } = req.query;
+    const { projectId, taskId, status, severity } = req.query;
     const params = [];
-    let sql = `${LIST_SQL} WHERE b.project_id = ?`;
-    params.push(projectId);
+    let sql = `${LIST_SQL} WHERE 1=1`;
+    if (taskId) {
+      sql += ' AND b.task_id = ?';
+      params.push(taskId);
+    } else if (projectId) {
+      sql += ' AND b.project_id = ?';
+      params.push(projectId);
+    } else {
+      return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });
+    }
     if (status) { sql += ' AND b.status = ?'; params.push(status); }
     if (severity) { sql += ' AND b.severity = ?'; params.push(severity); }
     sql += ' ORDER BY b.updated_at DESC';
@@ -40,28 +48,51 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, execution_id, test_case_id, requirement_id, code, title, description = '',
+    const { project_id, task_id, execution_id, test_case_id, requirement_id, code, title, description = '',
       severity = 'Média', priority = 'Média', status = 'Aberto', steps_to_reproduce = '',
       expected_result = '', actual_result = '', environment = '' } = req.body || {};
-    if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
+    if (!title) return res.status(400).json({ error: 'Título é obrigatório' });
 
-    // Integração: se veio de uma execução, herda caso e requisito
     let tcId = test_case_id || null;
     let reqId = requirement_id || null;
+    let resolvedTaskId = task_id || null;
+    let resolvedProjectId = project_id || null;
+
     if (execution_id) {
-      const exec = db.prepare('SELECT test_case_id FROM executions WHERE id=?').get(execution_id);
+      const exec = db.prepare('SELECT test_case_id, task_id, project_id FROM executions WHERE id=?').get(execution_id);
       if (exec) {
         tcId = tcId || exec.test_case_id;
-        const tc = db.prepare('SELECT requirement_id FROM test_cases WHERE id=?').get(tcId);
+        resolvedTaskId = resolvedTaskId || exec.task_id;
+        resolvedProjectId = resolvedProjectId || exec.project_id;
+        const tc = db.prepare('SELECT requirement_id, task_id, project_id FROM test_cases WHERE id=?').get(tcId);
         if (tc?.requirement_id) reqId = reqId || tc.requirement_id;
+        if (tc) {
+          resolvedTaskId = resolvedTaskId || tc.task_id;
+          resolvedProjectId = resolvedProjectId || tc.project_id;
+        }
+      }
+    } else if (tcId) {
+      const tc = db.prepare('SELECT requirement_id, task_id, project_id FROM test_cases WHERE id=?').get(tcId);
+      if (tc) {
+        reqId = reqId || tc.requirement_id;
+        resolvedTaskId = resolvedTaskId || tc.task_id;
+        resolvedProjectId = resolvedProjectId || tc.project_id;
       }
     }
 
-    const c = code || db.nextCode('bugs', 'BUG', project_id);
+    if (!resolvedTaskId) return res.status(400).json({ error: 'Tarefa é obrigatória' });
+    const task = db.resolveTask(resolvedTaskId);
+    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    resolvedProjectId = resolvedProjectId || task.project_id;
+    if (Number(resolvedProjectId) !== Number(task.project_id)) {
+      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+    }
+
+    const c = code || db.nextCode('bugs', 'BUG', resolvedProjectId);
     const r = db.prepare(
-      `INSERT INTO bugs (project_id, execution_id, test_case_id, requirement_id, code, title, description, severity, priority, status, steps_to_reproduce, expected_result, actual_result, environment)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(project_id, execution_id || null, tcId, reqId, c, title, description, severity, priority, status,
+      `INSERT INTO bugs (project_id, task_id, execution_id, test_case_id, requirement_id, code, title, description, severity, priority, status, steps_to_reproduce, expected_result, actual_result, environment)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(resolvedProjectId, resolvedTaskId, execution_id || null, tcId, reqId, c, title, description, severity, priority, status,
       steps_to_reproduce, expected_result, actual_result, environment);
     res.json({ id: Number(r.lastInsertRowid), code: c });
   });
@@ -83,7 +114,6 @@ module.exports = (db) => {
     res.json({ ok: true });
   });
 
-  // Retestes
   router.post('/:id/retests', (req, res) => {
     const { execution_id, result = 'Passou', notes = '', retest_date = null } = req.body || {};
     const r = db.prepare('INSERT INTO bug_retests (bug_id, execution_id, result, notes, retest_date) VALUES (?,?,?,?,?)')

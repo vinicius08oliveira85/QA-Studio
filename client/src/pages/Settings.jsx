@@ -24,7 +24,7 @@ export default function Settings() {
 
   return (
     <div>
-      <Header title="Configurações" subtitle="Chave da API Google Gemini usada pelo recurso 'Gerar com IA'." />
+      <Header title="Configurações" />
 
       <div className="panel" style={{ maxWidth: 640 }}>
         <div className="highlight">

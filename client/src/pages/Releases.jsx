@@ -30,8 +30,7 @@ export default function Releases() {
   return (
     <div>
       <Header
-        title="Homologação / Liberação"
-        subtitle="Agrupe requisitos, acompanhe a cobertura e decida pela liberação da release."
+        title="Homologação"
         actions={<Btn onClick={() => setCreating(true)}>Nova release</Btn>}
       />
 

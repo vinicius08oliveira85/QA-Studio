@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
@@ -15,10 +15,10 @@ const blank = {
 const routeOf = (type) => ({ 'Funcional': 'funcional', 'API': 'api', 'Fumaça': 'fumaca', 'Regressão': 'funcional' })[type] || 'funcional';
 
 export default function TestCases() {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const navigate = useNavigate();
   const { items, loading, refresh } = useList(React.useCallback(
-    () => api.get('/test-cases?projectId=' + current.id), [current.id]
+    () => api.get('/test-cases?taskId=' + taskId), [taskId]
   ));
 
   const [scenarios, setScenarios] = useState([]);
@@ -36,11 +36,11 @@ export default function TestCases() {
   const [detail, setDetail] = useState(null);
 
   React.useEffect(() => {
-    if (!current.id) return;
-    api.get('/scenarios?projectId=' + current.id).then(setScenarios).catch(() => {});
-    api.get('/requirements?projectId=' + current.id).then(setReqs).catch(() => {});
-    api.get('/strategies?projectId=' + current.id).then(setStrategies).catch(() => {});
-  }, [current.id]);
+    if (!taskId) return;
+    api.get('/scenarios?taskId=' + taskId).then(setScenarios).catch(() => {});
+    api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
+    api.get('/strategies?taskId=' + taskId).then(setStrategies).catch(() => {});
+  }, [taskId]);
 
   const filtered = items.filter((it) => {
     const t = `${it.code} ${it.title} ${it.requirement_code}`.toLowerCase();
@@ -76,7 +76,7 @@ export default function TestCases() {
     const steps = form.steps.filter((s) => s.action.trim()).map((s, i) => ({ order: i + 1, action: s.action, expected: s.expected }));
     const body = { ...form, steps };
     if (editing) await api.put('/test-cases/' + editing.id, body);
-    else await api.post('/test-cases', { ...body, project_id: current.id });
+    else await api.post('/test-cases', { ...body, project_id: current.id, task_id: taskId });
     refresh();
     setCreating(false); setEditing(null);
   };
@@ -125,8 +125,7 @@ export default function TestCases() {
   return (
     <div>
       <Header
-        title="Casos de Teste"
-        subtitle="Desenhe os passos e resultados esperados. Cada caso pode ter massa de teste e ser executado na seção Execução."
+        title="Casos"
         actions={<>
           <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
           <Btn onClick={openCreate}>Novo caso de teste</Btn>
@@ -268,7 +267,7 @@ export default function TestCases() {
               <div className="kv"><span className="k">Status</span><span className="v"><Badge tone={toneFor(detail.status)}>{detail.status}</Badge></span></div>
             </div>
             <div className="row-actions mb mt">
-              <Btn className="small" onClick={() => navigate(`/execucao/${routeOf(detail.type)}?case=${detail.id}`)}>Executar agora</Btn>
+              <Btn className="small" onClick={() => navigate(`/tarefas/${taskId}/execucao/${routeOf(detail.type)}?case=${detail.id}`)}>Executar agora</Btn>
               <Btn className="ghost small" onClick={() => toggleFlag(detail, 'regression_relevant')}>{detail.regression_relevant ? 'Remover da regressão' : 'Marcar p/ regressão'}</Btn>
               <Btn className="ghost small" onClick={() => toggleFlag(detail, 'automated')}>{detail.automated ? 'Desmarcar automatizado' : 'Marcar automatizado'}</Btn>
             </div>
@@ -311,7 +310,7 @@ export default function TestCases() {
                     <td>{e.environment}</td>
                     <td><Badge tone={toneFor(e.result)}>{e.result}</Badge></td>
                     <td>{e.bugs_count}</td>
-                    <td><Btn className="ghost small" onClick={() => navigate(`/execucao/${routeOf(detail.type)}?case=${detail.id}&exec=${e.id}`)}>Ver</Btn></td>
+                    <td><Btn className="ghost small" onClick={() => navigate(`/tarefas/${taskId}/execucao/${routeOf(detail.type)}?case=${detail.id}&exec=${e.id}`)}>Ver</Btn></td>
                   </tr>
                 ))}
               </tbody>

@@ -9,6 +9,7 @@
     "dev:client": "npm --prefix client run dev",
     "build": "npm --prefix client run build",
     "start": "node server/index.js",
+    "test:agent": "npm --prefix agent-runner start --",
     "postinstall": "npm --prefix client install"
   },
   "dependencies": {

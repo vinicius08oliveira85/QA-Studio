@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
 import { BUG_STATUS, toneFor } from '../utils.js';
 
 export default function Retests() {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const [bugs, setBugs] = useState([]);
   const [retests, setRetests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,8 +15,8 @@ export default function Retests() {
 
   const load = async () => {
     const [b, r] = await Promise.all([
-      api.get('/bugs?projectId=' + current.id),
-      api.get('/executions?projectId=' + current.id)
+      api.get('/bugs?taskId=' + taskId),
+      api.get('/executions?taskId=' + taskId)
     ]);
     setBugs(b);
     // monta visão global de retestes buscando cada bug com retestes
@@ -27,7 +27,7 @@ export default function Retests() {
     setLoading(false);
   };
 
-  React.useEffect(() => { load(); }, [current.id]);
+  React.useEffect(() => { load(); }, [taskId]);
 
   const openCreate = () => {
     setForm({ bug_id: filter.bugId || (bugs[0]?.id || ''), execution_id: '', result: 'Passou', notes: '', retest_date: new Date().toISOString().slice(0, 10) });
@@ -57,7 +57,6 @@ export default function Retests() {
     <div>
       <Header
         title="Reteste"
-        subtitle="Acompanhe a validação das correções dos bugs. Retestes com resultado 'Passou' fecham o bug automaticamente."
         actions={<Btn onClick={openCreate} disabled={bugs.length === 0}>Registrar reteste</Btn>}
       />
 

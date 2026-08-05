@@ -42,15 +42,13 @@ export default function Automations() {
   return (
     <div>
       <Header
-        title="Automatizar Processos Repetitivos"
-        subtitle="Identifique casos repetitivos e acompanhe o processo de automação."
+        title="Automação"
         actions={<Btn onClick={openCreate}>Nova automação</Btn>}
       />
 
       <div className="panel">
-        <h2>Candidatos à automação (processos repetitivos)</h2>
-        <p className="muted small">Casos não automatizados com execuções registradas. Automatize-os para ganhar tempo nas regressões.</p>
-        {suggestions.length === 0 ? <Empty>Nenhum candidato no momento. Casos executados várias vezes aparecem aqui.</Empty> : (
+        <h2>Candidatos à automação</h2>
+        {suggestions.length === 0 ? <Empty>Nenhum candidato.</Empty> : (
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Código</th><th>Caso</th><th>Tipo</th><th>Execuções</th><th>Massa</th><th>Regressão</th><th /></tr></thead>

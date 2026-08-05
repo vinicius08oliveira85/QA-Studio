@@ -8,6 +8,7 @@ app.use(express.json());
 
 const routes = {
   '/api/projects': require('./routes/projects'),
+  '/api/tasks': require('./routes/tasks'),
   '/api/requirements': require('./routes/requirements'),
   '/api/strategies': require('./routes/strategies'),
   '/api/scenarios': require('./routes/scenarios'),
@@ -19,7 +20,8 @@ const routes = {
   '/api/releases': require('./routes/releases'),
   '/api/dashboard': require('./routes/dashboard'),
   '/api/settings': require('./routes/settings'),
-  '/api/ai': require('./routes/ai')
+  '/api/ai': require('./routes/ai'),
+  '/api/agent-runs': require('./routes/agentRuns')
 };
 for (const [prefix, factory] of Object.entries(routes)) {
   app.use(prefix, factory(db));

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
@@ -6,9 +6,9 @@ import AiModal from '../components/AiModal.jsx';
 import { toneFor } from '../utils.js';
 
 export default function Scenarios() {
-  const { current } = useApp();
+  const { current, currentTask, taskId } = useApp();
   const { items, loading, refresh } = useList(React.useCallback(
-    () => api.get('/scenarios?projectId=' + current.id), [current.id]
+    () => api.get('/scenarios?taskId=' + taskId), [taskId]
   ));
   const [aiOpen, setAiOpen] = useState(false);
   const [reqs, setReqs] = useState([]);
@@ -18,8 +18,8 @@ export default function Scenarios() {
   const [form, setForm] = useState({ requirement_id: '', title: '', description: '', preconditions: '' });
 
   React.useEffect(() => {
-    if (current.id) api.get('/requirements?projectId=' + current.id).then(setReqs).catch(() => {});
-  }, [current.id]);
+    if (taskId) api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
+  }, [taskId]);
 
   const openCreate = () => { setForm({ requirement_id: '', title: '', description: '', preconditions: '' }); setCreating(true); };
   const openEdit = (s) => { setForm({ requirement_id: s.requirement_id || '', title: s.title, description: s.description, preconditions: s.preconditions }); setEditing(s); };
@@ -27,7 +27,7 @@ export default function Scenarios() {
   const save = async () => {
     if (!form.title.trim()) return;
     if (editing) await api.put('/scenarios/' + editing.id, form);
-    else await api.post('/scenarios', { ...form, project_id: current.id });
+    else await api.post('/scenarios', { ...form, project_id: current.id, task_id: taskId });
     refresh();
     setCreating(false); setEditing(null);
   };
@@ -46,8 +46,7 @@ export default function Scenarios() {
   return (
     <div>
       <Header
-        title="Cenários de Teste"
-        subtitle="Cenários descrevem situações de uso; cada um reúne casos de teste."
+        title="Cenários"
         actions={<>
           <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
           <Btn onClick={openCreate}>Novo cenário</Btn>
