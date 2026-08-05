@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import AiModal from '../components/AiModal.jsx';
 import { PRIORITIES, REQUIREMENT_STATUS, toneFor } from '../utils.js';
 
 export default function Requirements() {
@@ -10,6 +11,8 @@ export default function Requirements() {
     () => api.get('/requirements?projectId=' + current.id), [current.id]
   ));
 
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiCompleteOpen, setAiCompleteOpen] = useState(false);
   const [q, setQ] = useState('');
   const [fPriority, setFPriority] = useState('');
   const [fStatus, setFStatus] = useState('');
@@ -77,7 +80,11 @@ export default function Requirements() {
       <Header
         title="Requisitos e Regras de Negócio"
         subtitle="Documente o que deve ser implementado e as regras que precisam ser validadas pelos testes."
-        actions={<Btn onClick={openCreate}>Novo requisito</Btn>}
+        actions={<>
+          <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
+          <Btn className="ghost" onClick={() => setAiCompleteOpen(true)}>Completar com IA</Btn>
+          <Btn onClick={openCreate}>Novo requisito</Btn>
+        </>}
       />
 
       <div className="panel mb">
@@ -102,17 +109,24 @@ export default function Requirements() {
         <div className="table-wrap">
           {filtered.length === 0 ? <Empty>Nenhum requisito encontrado.</Empty> : (
             <table className="table">
-              <thead><tr><th>Código</th><th>Título</th><th>Módulo</th><th>Prioridade</th><th>Status</th><th>Regras</th><th>Casos</th><th /></tr></thead>
+              <thead><tr><th>Código</th><th>Título</th><th>Módulo</th><th>Prioridade</th><th>Status</th><th>Regras</th><th>Casos</th><th>Pendências</th><th /></tr></thead>
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id}>
-                    <td className="cell-title">{r.code}</td>
+                    <td className="cell-title">{r.source === 'ia' && <Badge tone="blue">IA</Badge>} {r.code}</td>
                     <td className="cell-title">{r.title}<div className="cell-sub">{r.description}</div></td>
                     <td>{r.module || '-'}</td>
                     <td><Badge tone={toneFor(r.priority)}>{r.priority}</Badge></td>
                     <td><Badge tone={toneFor(r.status)}>{r.status}</Badge></td>
                     <td>{r.rules_count}</td>
                     <td>{r.cases_count}</td>
+                    <td>
+                      <div className="row-actions" style={{ justifyContent: 'flex-start' }}>
+                        {r.rules_count === 0 && <Badge tone="amber">sem regras</Badge>}
+                        {r.scenarios_count === 0 && <Badge tone="amber">sem cenários</Badge>}
+                        {r.rules_count > 0 && r.scenarios_count > 0 && <Badge tone="green">completo</Badge>}
+                      </div>
+                    </td>
                     <td>
                       <div className="row-actions">
                         <Btn className="ghost small" onClick={() => loadDetail(r.id)}>Detalhes</Btn>
@@ -133,22 +147,28 @@ export default function Requirements() {
           <Field label="Código">
             <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="auto (ex.: REQ-001)" />
           </Field>
-          <Field label="Módulo"><Input value={form.module} onChange={(e) => setForm({ ...form, module: e.target.value })} placeholder="Ex.: Login" /></Field>
+          {editing && <Field label="Módulo"><Input value={form.module} onChange={(e) => setForm({ ...form, module: e.target.value })} placeholder="Ex.: Login" /></Field>}
         </div>
         <Field label="Título" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
         <Field label="Descrição"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-        <div className="grid2">
-          <Field label="Prioridade">
-            <Select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-              {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
-            </Select>
-          </Field>
-          <Field label="Status">
-            <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              {REQUIREMENT_STATUS.map((s) => <option key={s}>{s}</option>)}
-            </Select>
-          </Field>
-        </div>
+        {editing ? (
+          <div className="grid2">
+            <Field label="Prioridade">
+              <Select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                {REQUIREMENT_STATUS.map((s) => <option key={s}>{s}</option>)}
+              </Select>
+            </Field>
+          </div>
+        ) : (
+          <div className="highlight">
+            Módulo, prioridade, status e regras de negócio serão definidos pela IA: após criar, use <strong>Gerar com IA → Completar requisitos existentes</strong>.
+          </div>
+        )}
         <div className="modal-foot-inline"><Btn onClick={save}>{editing ? 'Salvar' : 'Criar'}</Btn></div>
       </Modal>
 
@@ -210,6 +230,9 @@ export default function Requirements() {
           </>
         )}
       </Modal>
+
+      <AiModal open={aiOpen} onClose={() => setAiOpen(false)} initialScope="requisitos" onApplied={refresh} />
+      <AiModal open={aiCompleteOpen} onClose={() => setAiCompleteOpen(false)} initialScope="completar" onApplied={refresh} />
     </div>
   );
 }

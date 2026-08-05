@@ -22,18 +22,27 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, requirement_id, title, description = '', preconditions = '' } = req.body || {};
+    const { project_id, requirement_id, title, description = '', preconditions = '', source = 'manual' } = req.body || {};
     if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
     const r = db.prepare(
-      'INSERT INTO test_scenarios (project_id, requirement_id, title, description, preconditions) VALUES (?,?,?,?,?)'
-    ).run(project_id, requirement_id || null, title, description, preconditions);
+      'INSERT INTO test_scenarios (project_id, requirement_id, title, description, preconditions, source) VALUES (?,?,?,?,?,?)'
+    ).run(project_id, requirement_id || null, title, description, preconditions, source);
     res.json({ id: Number(r.lastInsertRowid) });
   });
 
   router.put('/:id', (req, res) => {
-    const { requirement_id, title, description, preconditions } = req.body || {};
-    db.prepare("UPDATE test_scenarios SET requirement_id=?, title=?, description=?, preconditions=?, updated_at=datetime('now') WHERE id=?")
-      .run(requirement_id || null, title, description, preconditions, req.params.id);
+    const { requirement_id, title, description, preconditions, source } = req.body || {};
+    const cur = db.prepare('SELECT * FROM test_scenarios WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Cenário não encontrado' });
+    db.prepare("UPDATE test_scenarios SET requirement_id=?, title=?, description=?, preconditions=?, source=?, updated_at=datetime('now') WHERE id=?")
+      .run(
+        requirement_id !== undefined ? requirement_id : cur.requirement_id,
+        title !== undefined ? title : cur.title,
+        description !== undefined ? description : cur.description,
+        preconditions !== undefined ? preconditions : cur.preconditions,
+        source !== undefined ? source : cur.source,
+        req.params.id
+      );
     res.json({ ok: true });
   });
 

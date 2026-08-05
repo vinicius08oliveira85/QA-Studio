@@ -17,7 +17,9 @@ const routes = {
   '/api/regressions': require('./routes/regressions'),
   '/api/automations': require('./routes/automations'),
   '/api/releases': require('./routes/releases'),
-  '/api/dashboard': require('./routes/dashboard')
+  '/api/dashboard': require('./routes/dashboard'),
+  '/api/settings': require('./routes/settings'),
+  '/api/ai': require('./routes/ai')
 };
 for (const [prefix, factory] of Object.entries(routes)) {
   app.use(prefix, factory(db));

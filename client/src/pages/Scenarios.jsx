@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import AiModal from '../components/AiModal.jsx';
 import { toneFor } from '../utils.js';
 
 export default function Scenarios() {
@@ -9,6 +10,7 @@ export default function Scenarios() {
   const { items, loading, refresh } = useList(React.useCallback(
     () => api.get('/scenarios?projectId=' + current.id), [current.id]
   ));
+  const [aiOpen, setAiOpen] = useState(false);
   const [reqs, setReqs] = useState([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -46,7 +48,10 @@ export default function Scenarios() {
       <Header
         title="Cenários de Teste"
         subtitle="Cenários descrevem situações de uso; cada um reúne casos de teste."
-        actions={<Btn onClick={openCreate}>Novo cenário</Btn>}
+        actions={<>
+          <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
+          <Btn onClick={openCreate}>Novo cenário</Btn>
+        </>}
       />
 
       {loading ? <Loading /> : items.length === 0 ? (
@@ -58,9 +63,9 @@ export default function Scenarios() {
             <tbody>
               {items.map((s) => (
                 <tr key={s.id}>
-                  <td className="cell-title">{s.title}<div className="cell-sub">{s.description}</div></td>
+                  <td className="cell-title">{s.source === 'ia' && <Badge tone="blue">IA</Badge>} {s.title}<div className="cell-sub">{s.description}</div></td>
                   <td>{s.requirement_code ? <span>{s.requirement_code} - {s.requirement_title}</span> : '-'}</td>
-                  <td><Badge tone={s.cases_count ? 'blue' : 'gray'}>{s.cases_count} caso(s)</Badge></td>
+                  <td>{s.cases_count > 0 ? <Badge tone="blue">{s.cases_count} caso(s)</Badge> : <Badge tone="amber">sem casos</Badge>}</td>
                   <td>
                     <div className="row-actions">
                       <Btn className="ghost small" onClick={() => openDetail(s)}>Ver</Btn>
@@ -116,6 +121,8 @@ export default function Scenarios() {
           </>
         )}
       </Modal>
+
+      <AiModal open={aiOpen} onClose={() => setAiOpen(false)} initialScope="cenarios" onApplied={refresh} />
     </div>
   );
 }

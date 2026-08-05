@@ -19,6 +19,7 @@ import RegressionDetail from './pages/RegressionDetail.jsx';
 import Automations from './pages/Automations.jsx';
 import Releases from './pages/Releases.jsx';
 import ReleaseDetail from './pages/ReleaseDetail.jsx';
+import Settings from './pages/Settings.jsx';
 
 const MENU = [
   {
@@ -111,6 +112,7 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-foot">
+        <NavLink to="/configuracoes" className="menu-item foot-link">Configurações (IA)</NavLink>
         <span className="muted">Uso pessoal - dados locais</span>
       </div>
 
@@ -127,8 +129,21 @@ function Sidebar() {
 }
 
 function Shell() {
-  const { current, projects, loading } = useApp();
+  const { current, loading } = useApp();
   if (loading) return <div className="boot">Carregando...</div>;
+
+  if (!current) {
+    return (
+      <div className="layout">
+        <Sidebar />
+        <main className="content">
+          <Routes>
+            <Route path="*" element={<Projects />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="layout">
@@ -152,6 +167,7 @@ function Shell() {
           <Route path="/automacao" element={<Automations />} />
           <Route path="/homologacao" element={<Releases />} />
           <Route path="/homologacao/:id" element={<ReleaseDetail />} />
+          <Route path="/configuracoes" element={<Settings />} />
         </Routes>
       </main>
     </div>

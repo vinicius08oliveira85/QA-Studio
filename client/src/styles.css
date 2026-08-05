@@ -239,6 +239,26 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* Bug form highlight */
 .highlight { background: #fffbf0; border: 1px solid #f3d9a0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; }
 
+/* Collapse (seções recolhíveis) */
+.collapse { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; background: #fff; }.collapse-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 12px; background: #f8fafc; border: none; cursor: pointer; font: inherit;
+}
+.collapse-head:hover { background: #eef2ff; }
+.collapse-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.collapse-summary { margin-left: auto; font-size: 12px; color: var(--muted); }
+.collapse-chevron { color: var(--muted); font-size: 12px; transition: transform .15s; }
+.collapse.open .collapse-chevron { transform: rotate(90deg); }
+.collapse-body { padding: 12px; border-top: 1px solid var(--border); }
+
+/* Lista de seleção (checkboxes de contexto) */
+.check-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.check-item { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 3px 2px; }
+.check-item:hover { background: var(--gray-bg); border-radius: 6px; }
+.check-item input { accent-color: var(--primary); }
+.check-code { font-weight: 700; color: var(--primary); white-space: nowrap; }
+.check-item .badge { margin-left: auto; }
+
 /* Dashboard */
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .dash-col { min-width: 0; }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import AiModal from '../components/AiModal.jsx';
 import { CASE_STATUS, CASE_TYPES, EXECUTION_MODES, PRIORITIES, toneFor } from '../utils.js';
 
 const blank = {
@@ -25,6 +26,7 @@ export default function TestCases() {
   const [strategies, setStrategies] = useState([]);
 
   const [q, setQ] = useState('');
+  const [aiOpen, setAiOpen] = useState(false);
   const [fType, setFType] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fReq, setFReq] = useState('');
@@ -125,7 +127,10 @@ export default function TestCases() {
       <Header
         title="Casos de Teste"
         subtitle="Desenhe os passos e resultados esperados. Cada caso pode ter massa de teste e ser executado na seção Execução."
-        actions={<Btn onClick={openCreate}>Novo caso de teste</Btn>}
+        actions={<>
+          <Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>
+          <Btn onClick={openCreate}>Novo caso de teste</Btn>
+        </>}
       />
 
       <div className="panel mb">
@@ -165,14 +170,14 @@ export default function TestCases() {
               <tbody>
                 {filtered.map((tc) => (
                   <tr key={tc.id}>
-                    <td className="cell-title">{tc.code}</td>
+                    <td className="cell-title">{tc.source === 'ia' && <Badge tone="blue">IA</Badge>} {tc.code}</td>
                     <td className="cell-title">{tc.title}<div className="cell-sub">{tc.scenario_title}</div></td>
                     <td><Badge tone={tc.type === 'API' ? 'green' : tc.type === 'Fumaça' ? 'amber' : 'blue'}>{tc.type}</Badge></td>
                     <td><Badge tone={tc.execution_mode === 'Automatizado' ? 'blue' : 'gray'}>{tc.execution_mode}</Badge></td>
                     <td><Badge tone={toneFor(tc.priority)}>{tc.priority}</Badge></td>
                     <td><Badge tone={toneFor(tc.status)}>{tc.status}</Badge></td>
                     <td>{tc.requirement_code || '-'}</td>
-                    <td>{tc.mass_count}</td>
+                    <td>{tc.mass_count > 0 ? <Badge tone="blue">{tc.mass_count}</Badge> : <Badge tone="amber">sem massa</Badge>}</td>
                     <td>{tc.executions_count}</td>
                     <td>{tc.last_result ? <Badge tone={toneFor(tc.last_result)}>{tc.last_result}</Badge> : '-'}</td>
                     <td>
@@ -314,6 +319,8 @@ export default function TestCases() {
           </>
         )}
       </Modal>
+
+      <AiModal open={aiOpen} onClose={() => setAiOpen(false)} initialScope="casos" onApplied={refresh} />
     </div>
   );
 }

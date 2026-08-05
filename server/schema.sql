@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS requirements (
   priority    TEXT DEFAULT 'Média',      -- Alta | Média | Baixa
   status      TEXT DEFAULT 'Ativo',       -- Ativo | Em Análise | Homologado | Cancelado
   module      TEXT DEFAULT '',
+  source      TEXT DEFAULT 'manual',       -- manual | ia
   created_at  TEXT DEFAULT (datetime('now')),
   updated_at  TEXT DEFAULT (datetime('now')),
   UNIQUE(project_id, code)
@@ -37,12 +38,14 @@ CREATE TABLE IF NOT EXISTS business_rules (
   requirement_id INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
   rule           TEXT NOT NULL,
   category       TEXT DEFAULT 'Regra de Negócio',
+  source         TEXT DEFAULT 'manual',       -- manual | ia
   created_at     TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS test_strategies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id     INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
   name           TEXT NOT NULL,
   description    TEXT DEFAULT '',
   approach       TEXT DEFAULT '',   -- abordagem geral
@@ -50,6 +53,7 @@ CREATE TABLE IF NOT EXISTS test_strategies (
   entry_criteria TEXT DEFAULT '',
   exit_criteria  TEXT DEFAULT '',
   status         TEXT DEFAULT 'Ativo',   -- Ativo | Arquivo
+  source         TEXT DEFAULT 'manual',  -- manual | ia
   created_at     TEXT DEFAULT (datetime('now')),
   updated_at     TEXT DEFAULT (datetime('now'))
 );
@@ -64,6 +68,7 @@ CREATE TABLE IF NOT EXISTS test_scenarios (
   title          TEXT NOT NULL,
   description    TEXT DEFAULT '',
   preconditions  TEXT DEFAULT '',
+  source         TEXT DEFAULT 'manual',       -- manual | ia
   created_at     TEXT DEFAULT (datetime('now')),
   updated_at     TEXT DEFAULT (datetime('now'))
 );
@@ -81,10 +86,11 @@ CREATE TABLE IF NOT EXISTS test_cases (
   execution_mode     TEXT DEFAULT 'Manual',          -- Manual | Automatizado
   status             TEXT DEFAULT 'Pronto',          -- Rascunho | Pronto | Executado
   preconditions      TEXT DEFAULT '',
-  steps              TEXT DEFAULT '[]',              -- JSON: [{order, action, expected}]
+  steps               TEXT DEFAULT '[]',              -- JSON: [{order, action, expected}]
   regression_relevant INTEGER DEFAULT 0,             -- marca para regressão
-  automated          INTEGER DEFAULT 0,              -- automatizado?
-  automation_tool    TEXT DEFAULT '',
+  automated           INTEGER DEFAULT 0,              -- automatizado?
+  automation_tool     TEXT DEFAULT '',
+  source              TEXT DEFAULT 'manual',          -- manual | ia
   created_at         TEXT DEFAULT (datetime('now')),
   updated_at         TEXT DEFAULT (datetime('now')),
   UNIQUE(project_id, code)
@@ -96,6 +102,7 @@ CREATE TABLE IF NOT EXISTS test_mass (
   name         TEXT NOT NULL,
   data         TEXT DEFAULT '',      -- massa (texto/json)
   purpose      TEXT DEFAULT '',
+  source       TEXT DEFAULT 'manual',       -- manual | ia
   created_at   TEXT DEFAULT (datetime('now'))
 );
 
@@ -214,6 +221,12 @@ CREATE TABLE IF NOT EXISTS release_requirements (
   release_id     INTEGER NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
   requirement_id INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
   UNIQUE(release_id, requirement_id)
+);
+
+-- Configurações gerais (chave de IA, modelo, etc.)
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT DEFAULT ''
 );
 
 -- Índices de integração

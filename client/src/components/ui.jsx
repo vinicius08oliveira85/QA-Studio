@@ -89,3 +89,17 @@ export function useList(load) {
 export function Loading() {
   return <div className="empty">Carregando...</div>;
 }
+
+export function Collapse({ title, summary, defaultOpen = false, children }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className={`collapse ${open ? 'open' : ''}`}>
+      <button type="button" className="collapse-head" onClick={() => setOpen(!open)}>
+        <span className="collapse-title">{title}</span>
+        {summary && <span className="collapse-summary">{summary}</span>}
+        <span className="collapse-chevron">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && <div className="collapse-body">{children}</div>}
+    </div>
+  );
+}

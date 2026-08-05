@@ -44,30 +44,32 @@ module.exports = (db) => {
   router.post('/', (req, res) => {
     const { project_id, scenario_id, requirement_id, strategy_id, code, title,
       priority = 'Média', type = 'Funcional', execution_mode = 'Manual', status = 'Pronto',
-      preconditions = '', steps = [], regression_relevant = 0, automated = 0, automation_tool = '' } = req.body || {};
+      preconditions = '', steps = [], regression_relevant = 0, automated = 0, automation_tool = '', source = 'manual' } = req.body || {};
     if (!project_id || !title) return res.status(400).json({ error: 'Projeto e título são obrigatórios' });
     const c = code || db.nextCode('test_cases', 'TC', project_id);
     const r = db.prepare(
-      `INSERT INTO test_cases (project_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps, regression_relevant, automated, automation_tool)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO test_cases (project_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps, regression_relevant, automated, automation_tool, source)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(project_id, scenario_id || null, requirement_id || null, strategy_id || null, c, title,
       priority, type, execution_mode, status, preconditions, JSON.stringify(steps || []),
-      regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '');
+      regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '', source);
     res.json({ id: Number(r.lastInsertRowid), code: c });
   });
 
   router.put('/:id', (req, res) => {
     const { scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode,
-      status, preconditions, steps, regression_relevant, automated, automation_tool } = req.body || {};
+      status, preconditions, steps, regression_relevant, automated, automation_tool, source } = req.body || {};
     let stepsArr = steps;
     if (typeof steps === 'string') { try { stepsArr = JSON.parse(steps); } catch { stepsArr = []; } }
+    const cur = db.prepare('SELECT source FROM test_cases WHERE id=?').get(req.params.id);
+    const finalSource = source !== undefined ? source : (cur?.source || 'manual');
     db.prepare(
       `UPDATE test_cases SET scenario_id=?, requirement_id=?, strategy_id=?, code=?, title=?, priority=?,
         type=?, execution_mode=?, status=?, preconditions=?, steps=?, regression_relevant=?, automated=?,
-        automation_tool=?, updated_at=datetime('now') WHERE id=?`
+        automation_tool=?, source=?, updated_at=datetime('now') WHERE id=?`
     ).run(scenario_id || null, requirement_id || null, strategy_id || null, code, title, priority,
       type, execution_mode, status, preconditions, JSON.stringify(stepsArr || []),
-      regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '', req.params.id);
+      regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '', finalSource, req.params.id);
     res.json({ ok: true });
   });
 
@@ -108,10 +110,10 @@ module.exports = (db) => {
   });
 
   router.post('/:id/test-mass', (req, res) => {
-    const { name, data = '', purpose = '' } = req.body || {};
+    const { name, data = '', purpose = '', source = 'manual' } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
-    const r = db.prepare('INSERT INTO test_mass (test_case_id, name, data, purpose) VALUES (?,?,?,?)')
-      .run(req.params.id, name, data, purpose);
+    const r = db.prepare('INSERT INTO test_mass (test_case_id, name, data, purpose, source) VALUES (?,?,?,?,?)')
+      .run(req.params.id, name, data, purpose, source);
     res.json({ id: Number(r.lastInsertRowid) });
   });
 
