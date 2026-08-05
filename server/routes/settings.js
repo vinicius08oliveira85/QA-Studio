@@ -3,11 +3,17 @@ const express = require('express');
 module.exports = (db) => {
   const router = express.Router();
 
+  const getSetting = (key) => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    return row ? row.value : '';
+  };
+
   router.get('/', (req, res) => {
-    const rows = db.prepare('SELECT key, value FROM settings').all();
-    const obj = {};
-    for (const r of rows) obj[r.key] = r.value;
-    res.json(obj);
+    const hasEnvKey = Boolean(process.env.GEMINI_API_KEY);
+    res.json({
+      geminiConfigured: hasEnvKey || Boolean(getSetting('geminiApiKey')),
+      geminiModel: getSetting('geminiModel') || 'gemini-2.0-flash'
+    });
   });
 
   router.put('/', (req, res) => {

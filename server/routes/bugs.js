@@ -1,4 +1,5 @@
 const express = require('express');
+const { validateTaskOwnership } = require('../helpers');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -81,12 +82,9 @@ module.exports = (db) => {
     }
 
     if (!resolvedTaskId) return res.status(400).json({ error: 'Tarefa é obrigatória' });
-    const task = db.resolveTask(resolvedTaskId);
-    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
-    resolvedProjectId = resolvedProjectId || task.project_id;
-    if (Number(resolvedProjectId) !== Number(task.project_id)) {
-      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
-    }
+    const owned = validateTaskOwnership(db, resolvedTaskId, resolvedProjectId);
+    if (owned.error) return res.status(owned.status).json({ error: owned.error });
+    resolvedProjectId = resolvedProjectId || owned.task.project_id;
 
     const c = code || db.nextCode('bugs', 'BUG', resolvedProjectId);
     const r = db.prepare(
@@ -94,12 +92,14 @@ module.exports = (db) => {
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(resolvedProjectId, resolvedTaskId, execution_id || null, tcId, reqId, c, title, description, severity, priority, status,
       steps_to_reproduce, expected_result, actual_result, environment);
-    res.json({ id: Number(r.lastInsertRowid), code: c });
+    res.status(201).json({ id: Number(r.lastInsertRowid), code: c });
   });
 
   router.put('/:id', (req, res) => {
     const { execution_id, test_case_id, requirement_id, code, title, description, severity, priority,
       status, steps_to_reproduce, expected_result, actual_result, environment } = req.body || {};
+    const row = db.prepare('SELECT id FROM bugs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
     db.prepare(
       `UPDATE bugs SET execution_id=?, test_case_id=?, requirement_id=?, code=?, title=?, description=?,
         severity=?, priority=?, status=?, steps_to_reproduce=?, expected_result=?, actual_result=?,
@@ -110,30 +110,41 @@ module.exports = (db) => {
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM bugs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
     db.prepare('DELETE FROM bugs WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });
 
   router.post('/:id/retests', (req, res) => {
     const { execution_id, result = 'Passou', notes = '', retest_date = null } = req.body || {};
-    const r = db.prepare('INSERT INTO bug_retests (bug_id, execution_id, result, notes, retest_date) VALUES (?,?,?,?,?)')
-      .run(req.params.id, execution_id || null, result, notes, retest_date || null);
-    if (result === 'Passou') {
-      db.prepare("UPDATE bugs SET status='Fechado', updated_at=datetime('now') WHERE id=?").run(req.params.id);
-    } else if (result === 'Falhou') {
-      db.prepare("UPDATE bugs SET status='Em Correção', updated_at=datetime('now') WHERE id=?").run(req.params.id);
-    }
-    res.json({ id: Number(r.lastInsertRowid) });
+    const bug = db.prepare('SELECT id FROM bugs WHERE id=?').get(req.params.id);
+    if (!bug) return res.status(404).json({ error: 'Bug não encontrado' });
+    const r = db.tx(() => {
+      const ins = db.prepare('INSERT INTO bug_retests (bug_id, execution_id, result, notes, retest_date) VALUES (?,?,?,?,?)')
+        .run(req.params.id, execution_id || null, result, notes, retest_date || null);
+      if (result === 'Passou') {
+        db.prepare("UPDATE bugs SET status='Fechado', updated_at=datetime('now') WHERE id=?").run(req.params.id);
+      } else if (result === 'Falhou') {
+        db.prepare("UPDATE bugs SET status='Em Correção', updated_at=datetime('now') WHERE id=?").run(req.params.id);
+      }
+      return Number(ins.lastInsertRowid);
+    });
+    res.status(201).json({ id: r });
   });
 
   router.put('/retests/:rid', (req, res) => {
     const { execution_id, result, notes } = req.body || {};
+    const row = db.prepare('SELECT id FROM bug_retests WHERE id=?').get(req.params.rid);
+    if (!row) return res.status(404).json({ error: 'Reteste não encontrado' });
     db.prepare('UPDATE bug_retests SET execution_id=?, result=?, notes=? WHERE id=?')
       .run(execution_id || null, result, notes, req.params.rid);
     res.json({ ok: true });
   });
 
   router.delete('/retests/:rid', (req, res) => {
+    const row = db.prepare('SELECT id FROM bug_retests WHERE id=?').get(req.params.rid);
+    if (!row) return res.status(404).json({ error: 'Reteste não encontrado' });
     db.prepare('DELETE FROM bug_retests WHERE id=?').run(req.params.rid);
     res.json({ ok: true });
   });

@@ -5,6 +5,7 @@ module.exports = (db) => {
 
   router.get('/', (req, res) => {
     const { projectId } = req.query;
+    if (!projectId) return res.status(400).json({ error: 'projectId é obrigatório' });
     res.json(db.prepare(`
       SELECT rr.*,
         (SELECT COUNT(*) FROM regression_run_cases rrc WHERE rrc.run_id = rr.id) AS total_cases,
@@ -51,31 +52,39 @@ module.exports = (db) => {
     const r = db.prepare(
       'INSERT INTO regression_runs (project_id, name, environment, notes) VALUES (?,?,?,?)'
     ).run(project_id, name, environment, notes);
-    res.json({ id: Number(r.lastInsertRowid) });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
 
   router.put('/:id', (req, res) => {
     const { name, status, environment, notes } = req.body || {};
+    const row = db.prepare('SELECT id FROM regression_runs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Regressão não encontrada' });
     db.prepare("UPDATE regression_runs SET name=?, status=?, environment=?, notes=?, updated_at=datetime('now') WHERE id=?")
       .run(name, status, environment, notes, req.params.id);
     res.json({ ok: true });
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM regression_runs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Regressão não encontrada' });
     db.prepare('DELETE FROM regression_runs WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });
 
   router.post('/:id/cases', (req, res) => {
     const { test_case_id } = req.body || {};
+    const run = db.prepare('SELECT id FROM regression_runs WHERE id=?').get(req.params.id);
+    if (!run) return res.status(404).json({ error: 'Regressão não encontrada' });
     const exists = db.prepare('SELECT id FROM regression_run_cases WHERE run_id=? AND test_case_id=?').get(req.params.id, test_case_id);
     if (!exists) {
       db.prepare('INSERT INTO regression_run_cases (run_id, test_case_id) VALUES (?,?)').run(req.params.id, test_case_id);
     }
-    res.json({ ok: true });
+    res.status(201).json({ ok: true });
   });
 
   router.post('/:id/populate', (req, res) => {
+    const run = db.prepare('SELECT id FROM regression_runs WHERE id=?').get(req.params.id);
+    if (!run) return res.status(404).json({ error: 'Regressão não encontrada' });
     const rows = db.prepare(`
       SELECT tc.id FROM test_cases tc
       WHERE tc.project_id = (SELECT project_id FROM regression_runs WHERE id = ?)
@@ -89,11 +98,16 @@ module.exports = (db) => {
 
   router.put('/cases/:cid', (req, res) => {
     const { result, notes = '' } = req.body || {};
+    const row = db.prepare('SELECT id FROM regression_run_cases WHERE id=?').get(req.params.cid);
+    if (!row) return res.status(404).json({ error: 'Caso de regressão não encontrado' });
     db.prepare('UPDATE regression_run_cases SET result=?, notes=? WHERE id=?').run(result, notes, req.params.cid);
     res.json({ ok: true });
   });
 
   router.delete('/:id/cases/:testCaseId', (req, res) => {
+    const row = db.prepare('SELECT id FROM regression_run_cases WHERE run_id=? AND test_case_id=?')
+      .get(req.params.id, req.params.testCaseId);
+    if (!row) return res.status(404).json({ error: 'Caso de regressão não encontrado' });
     db.prepare('DELETE FROM regression_run_cases WHERE run_id=? AND test_case_id=?')
       .run(req.params.id, req.params.testCaseId);
     res.json({ ok: true });

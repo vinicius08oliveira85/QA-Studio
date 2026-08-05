@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, Outlet, useParams, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context.jsx';
-import { Field, Input, Btn, Modal, Badge } from './components/ui.jsx';
+import { Field, Input, Btn, Modal, Badge, ErrorBanner } from './components/ui.jsx';
 import TaskTabs from './components/TaskTabs.jsx';
 import { api } from './api.js';
 import { toneFor } from './utils.js';
@@ -47,6 +47,7 @@ function TaskWorkspace() {
   const { setTaskId, taskId, tasks, refreshTasks, projectId } = useApp();
   const navigate = useNavigate();
   const id = Number(paramId);
+  const checkedRef = React.useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -56,11 +57,15 @@ function TaskWorkspace() {
   useEffect(() => {
     if (!id || !tasks.length) return;
     const found = tasks.find((t) => t.id === id);
-    if (!found) {
-      refreshTasks(projectId).then((list) => {
-        if (!list.find((t) => t.id === id)) navigate('/tarefas', { replace: true });
-      });
+    if (found) {
+      checkedRef.current = false;
+      return;
     }
+    if (checkedRef.current) return;
+    checkedRef.current = true;
+    refreshTasks(projectId).then((list) => {
+      if (!list.find((t) => t.id === id)) navigate('/tarefas', { replace: true });
+    });
   }, [id, tasks, refreshTasks, projectId, navigate]);
 
   return (
@@ -80,17 +85,23 @@ function Sidebar() {
   } = useApp();
   const [newProject, setNewProject] = useState(false);
   const [name, setName] = useState('');
+  const [projectErr, setProjectErr] = useState('');
   const navigate = useNavigate();
   const inTask = Boolean(taskId);
 
   const createProject = async () => {
     if (!name.trim()) return;
-    const r = await api.post('/projects', { name: name.trim() });
-    await refreshProjects();
-    setProjectId(r.id);
-    setNewProject(false);
-    setName('');
-    navigate('/tarefas');
+    setProjectErr('');
+    try {
+      const r = await api.post('/projects', { name: name.trim() });
+      await refreshProjects();
+      setProjectId(r.id);
+      setNewProject(false);
+      setName('');
+      navigate('/tarefas');
+    } catch (e) {
+      setProjectErr(e.message || 'Falha ao criar projeto.');
+    }
   };
 
   const leaveTask = () => {
@@ -109,9 +120,10 @@ function Sidebar() {
       </div>
 
       <div className="project-box">
-        <label className="project-label">Projeto</label>
+        <label className="project-label" htmlFor="project-select">Projeto</label>
         {projects.length > 0 ? (
           <select
+            id="project-select"
             className="input"
             value={projectId}
             onChange={(e) => {
@@ -164,6 +176,7 @@ function Sidebar() {
       </div>
 
       <Modal open={newProject} onClose={() => setNewProject(false)} title="Novo projeto" width={420}>
+        {projectErr && <ErrorBanner>{projectErr}</ErrorBanner>}
         <Field label="Nome do projeto" required>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Portal Web" onKeyDown={(e) => e.key === 'Enter' && createProject()} />
         </Field>
@@ -231,6 +244,7 @@ function Shell() {
           <Route path="/bugs" element={<Navigate to="/tarefas" replace />} />
           <Route path="/reteste" element={<Navigate to="/tarefas" replace />} />
           <Route path="/execucao/*" element={<Navigate to="/tarefas" replace />} />
+          <Route path="*" element={<Navigate to="/tarefas" replace />} />
         </Routes>
       </main>
     </div>

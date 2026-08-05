@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api } from './api.js';
 
 const Ctx = createContext(null);
@@ -10,9 +10,9 @@ export function AppProvider({ children }) {
   const [taskId, setTaskIdState] = useState(() => Number(localStorage.getItem('qa_task')) || 0);
   const [loading, setLoading] = useState(true);
 
-  const refreshProjects = () => api.get('/projects').then(setProjects).catch(() => setProjects([]));
+  const refreshProjects = useCallback(() => api.get('/projects').then(setProjects).catch(() => setProjects([])), []);
 
-  const refreshTasks = (pid) => {
+  const refreshTasks = useCallback((pid) => {
     const id = pid || projectId;
     if (!id) {
       setTasks([]);
@@ -25,11 +25,11 @@ export function AppProvider({ children }) {
       setTasks([]);
       return [];
     });
-  };
+  }, [projectId]);
 
   useEffect(() => {
     refreshProjects().finally(() => setLoading(false));
-  }, []);
+  }, [refreshProjects]);
 
   const current = projects.find((p) => p.id === projectId) || projects[0] || null;
   const resolvedProjectId = current ? current.id : 0;
@@ -40,24 +40,24 @@ export function AppProvider({ children }) {
       return;
     }
     refreshTasks(resolvedProjectId);
-  }, [resolvedProjectId]);
+  }, [resolvedProjectId, refreshTasks]);
 
   const currentTask = tasks.find((t) => t.id === taskId) || null;
 
-  const setProjectId = (id) => {
+  const setProjectId = useCallback((id) => {
     const n = Number(id);
     setProjectIdState(n);
     localStorage.setItem('qa_project', String(n));
     setTaskIdState(0);
     localStorage.removeItem('qa_task');
-  };
+  }, []);
 
-  const setTaskId = (id) => {
+  const setTaskId = useCallback((id) => {
     const n = Number(id) || 0;
     setTaskIdState(n);
     if (n) localStorage.setItem('qa_task', String(n));
     else localStorage.removeItem('qa_task');
-  };
+  }, []);
 
   const value = {
     projects,

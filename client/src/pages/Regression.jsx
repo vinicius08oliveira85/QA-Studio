@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Textarea, useList } from '../components/ui.jsx';
+import EnvSelect from '../components/EnvSelect.jsx';
 import { RUN_STATUS, toneFor } from '../utils.js';
 
 export default function Regression() {
@@ -12,13 +13,17 @@ export default function Regression() {
   ));
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', environment: 'Homologação', notes: '' });
+  const [error, setError] = useState('');
 
   const save = async () => {
     if (!form.name.trim()) return;
-    await api.post('/regressions', { ...form, project_id: current.id });
-    refresh();
-    setCreating(false);
-    setForm({ name: '', environment: 'Homologação', notes: '' });
+    try {
+      await api.post('/regressions', { ...form, project_id: current.id });
+      refresh();
+      setCreating(false);
+      setError('');
+      setForm({ name: '', environment: 'Homologação', notes: '' });
+    } catch (e) { setError(e.message || 'Falha ao criar regressão.'); }
   };
 
   const remove = async (r) => {
@@ -39,6 +44,7 @@ export default function Regression() {
         title="Regressão"
         actions={<Btn onClick={() => setCreating(true)}>Nova regressão</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? <Loading /> : items.length === 0 ? (
         <Empty>Crie uma rodada de regressão. Dica: marque casos como "regressão" na seção Casos de Teste.</Empty>
@@ -68,9 +74,7 @@ export default function Regression() {
       <Modal open={creating} onClose={() => setCreating(false)} title="Nova regressão" width={520}>
         <Field label="Nome" required><Input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: Regressão Release 1.1" /></Field>
         <Field label="Ambiente">
-          <Select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>
-            <option>Homologação</option><option>Staging</option><option>Produção</option><option>Local</option>
-          </Select>
+          <EnvSelect value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })} />
         </Field>
         <Field label="Observações"><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
         <div className="modal-foot-inline"><Btn onClick={save}>Criar</Btn></div>

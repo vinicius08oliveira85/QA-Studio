@@ -1,4 +1,5 @@
 const express = require('express');
+const { validateTaskOwnership } = require('../helpers');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -56,36 +57,38 @@ module.exports = (db) => {
     const resolvedProjectId = project_id || tc.project_id;
     if (!resolvedTaskId) return res.status(400).json({ error: 'Tarefa é obrigatória' });
 
-    const task = db.resolveTask(resolvedTaskId);
-    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
-    if (Number(resolvedProjectId) !== Number(task.project_id)) {
-      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
-    }
+    const owned = validateTaskOwnership(db, resolvedTaskId, resolvedProjectId);
+    if (owned.error) return res.status(owned.status).json({ error: owned.error });
 
-    const r = db.prepare(
-      `INSERT INTO executions (project_id, task_id, test_case_id, environment, tester, result, actual_result, notes) VALUES (?,?,?,?,?,?,?,?)`
-    ).run(resolvedProjectId, resolvedTaskId, test_case_id, environment, tester, result, actual_result, notes);
-    const execId = Number(r.lastInsertRowid);
+    const r = db.tx(() => {
+      const ins = db.prepare(
+        `INSERT INTO executions (project_id, task_id, test_case_id, environment, tester, result, actual_result, notes) VALUES (?,?,?,?,?,?,?,?)`
+      ).run(resolvedProjectId, resolvedTaskId, test_case_id, environment, tester, result, actual_result, notes);
+      const execId = Number(ins.lastInsertRowid);
 
-    let steps = [];
-    try { steps = JSON.parse(tc?.steps || '[]'); } catch { steps = []; }
-    const norm = (s) => ({ order: Number(s.order ?? s.step_order) || 0, action: s.action || '', expected: s.expected || '' });
-    const map = {};
-    for (const sr of step_results || []) map[Number(sr.step_order ?? sr.order)] = sr;
-    const ins = db.prepare(
-      'INSERT INTO execution_steps (execution_id, step_order, action, expected, actual, result) VALUES (?,?,?,?,?,?)'
-    );
-    for (const raw of steps) {
-      const s = norm(raw);
-      const sr = map[s.order] || {};
-      ins.run(execId, s.order, s.action, s.expected, sr.actual || '', sr.result || 'Passou');
-    }
-    db.prepare("UPDATE test_cases SET status='Executado', updated_at=datetime('now') WHERE id=? AND status IN ('Pronto','Rascunho')").run(test_case_id);
-    res.json({ id: execId });
+      let steps;
+      try { steps = JSON.parse(tc?.steps || '[]'); } catch { steps = []; }
+      const norm = (s) => ({ order: Number(s.order ?? s.step_order) || 0, action: s.action || '', expected: s.expected || '' });
+      const map = {};
+      for (const sr of step_results || []) map[Number(sr.step_order ?? sr.order)] = sr;
+      const insStep = db.prepare(
+        'INSERT INTO execution_steps (execution_id, step_order, action, expected, actual, result) VALUES (?,?,?,?,?,?)'
+      );
+      for (const raw of steps) {
+        const s = norm(raw);
+        const sr = map[s.order] || {};
+        insStep.run(execId, s.order, s.action, s.expected, sr.actual || '', sr.result || 'Passou');
+      }
+      db.prepare("UPDATE test_cases SET status='Executado', updated_at=datetime('now') WHERE id=? AND status IN ('Pronto','Rascunho')").run(test_case_id);
+      return execId;
+    });
+    res.status(201).json({ id: r });
   });
 
   router.put('/:id', (req, res) => {
     const { environment, tester, result, actual_result, notes, step_results = [] } = req.body || {};
+    const row = db.prepare('SELECT id FROM executions WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
     db.prepare("UPDATE executions SET environment=?, tester=?, result=?, actual_result=?, notes=? WHERE id=?")
       .run(environment, tester, result, actual_result, notes, req.params.id);
     const upd = db.prepare('UPDATE execution_steps SET actual=?, result=? WHERE execution_id=? AND step_order=?');
@@ -96,6 +99,8 @@ module.exports = (db) => {
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM executions WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
     db.prepare('DELETE FROM executions WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });

@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { toneFor } from '../utils.js';
 
@@ -16,6 +16,7 @@ export default function Scenarios() {
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState({ requirement_id: '', title: '', description: '', preconditions: '' });
+  const [error, run] = useAction();
 
   React.useEffect(() => {
     if (taskId) api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
@@ -26,16 +27,20 @@ export default function Scenarios() {
 
   const save = async () => {
     if (!form.title.trim()) return;
-    if (editing) await api.put('/scenarios/' + editing.id, form);
-    else await api.post('/scenarios', { ...form, project_id: current.id, task_id: taskId });
-    refresh();
-    setCreating(false); setEditing(null);
+    await run(async () => {
+      if (editing) await api.put('/scenarios/' + editing.id, form);
+      else await api.post('/scenarios', { ...form, project_id: current.id, task_id: taskId });
+      refresh();
+      setCreating(false); setEditing(null);
+    });
   };
 
   const remove = async (s) => {
     if (!window.confirm(`Excluir o cenário "${s.title}"?`)) return;
-    await api.del('/scenarios/' + s.id);
-    refresh();
+    await run(async () => {
+      await api.del('/scenarios/' + s.id);
+      refresh();
+    });
   };
 
   const openDetail = async (s) => {
@@ -52,6 +57,7 @@ export default function Scenarios() {
           <Btn onClick={openCreate}>Novo cenário</Btn>
         </>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? <Loading /> : items.length === 0 ? (
         <Empty>Crie cenários a partir dos requisitos para organizar os casos de teste.</Empty>

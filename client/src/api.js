@@ -1,8 +1,17 @@
 const BASE = '/api';
 
+function appToken() {
+  try {
+    return localStorage.getItem('qa_app_token') || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_TOKEN) || '';
+  } catch { return ''; }
+}
+
 async function request(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = appToken();
+  if (token) headers['x-app-token'] = token;
   const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined
   });

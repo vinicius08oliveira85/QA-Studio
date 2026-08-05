@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Usar Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Instalar dependências (raiz)
+        # --ignore-scripts: o postinstall instala o client novamente (duplicado)
+        run: npm ci --ignore-scripts
+
+      - name: Instalar dependências (client)
+        run: npm --prefix client ci
+
+      - name: Instalar dependências (agent-runner)
+        run: npm --prefix agent-runner ci --ignore-scripts
+
+      - name: Lint (server + agent-runner)
+        run: npm run lint
+
+      - name: Testes unitários (server)
+        run: npm run test:unit
+
+      - name: Testes do client
+        run: npm --prefix client test
+
+      - name: Build do client
+        run: npm run build
+
+      - name: Testes de integração da API
+        run: |
+          PORT=3100 node server/index.js > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3100/api/projects >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          QA_API_BASE=http://127.0.0.1:3100/api node scripts/test-api.js
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "=== server.log ==="
+            cat /tmp/api.log
+          fi
+          exit $STATUS
+        env:
+          QA_API_BASE: http://127.0.0.1:3100/api
+          PORT: 3100

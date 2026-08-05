@@ -26,7 +26,7 @@ module.exports = (db) => {
     const { prompt } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Prompt é obrigatório.' });
 
-    const apiKey = getSetting('geminiApiKey');
+    const apiKey = process.env.GEMINI_API_KEY || getSetting('geminiApiKey');
     if (!apiKey) {
       return res.status(400).json({
         error: 'Chave da API Gemini não configurada. Abra Configurações e adicione sua chave.'
@@ -47,12 +47,14 @@ module.exports = (db) => {
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(Number(process.env.GEMINI_TIMEOUT_MS) || 60_000)
       });
       const data = await resp.json();
       if (!resp.ok) {
         const msg = data?.error?.message || `HTTP ${resp.status}`;
-        return res.status(502).json({ error: `Erro do Gemini: ${msg}` });
+        console.error('[gemini]', resp.status, msg);
+        return res.status(502).json({ error: 'Erro ao chamar a API do Gemini. Tente novamente.' });
       }
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       const content = extractJson(text);
@@ -61,7 +63,9 @@ module.exports = (db) => {
       }
       res.json({ content });
     } catch (err) {
-      res.status(502).json({ error: 'Falha ao chamar a API do Gemini: ' + err.message });
+      const aborted = err.name === 'TimeoutError' || /abort/i.test(err?.message || '');
+      console.error('[gemini]', aborted ? 'timeout' : (err.message || err));
+      res.status(502).json({ error: aborted ? 'A chamada à IA excedeu o tempo limite. Tente novamente.' : 'Falha ao chamar a API do Gemini. Tente novamente.' });
     }
   });
 

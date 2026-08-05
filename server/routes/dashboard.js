@@ -70,9 +70,14 @@ module.exports = (db) => {
     if (taskId) {
       const task = db.resolveTask(taskId);
       if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+      if (projectId && Number(projectId) !== Number(task.project_id)) {
+        return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+      }
       return res.json({ ...buildDashboard('task_id', taskId, false), scope: 'task', taskId: Number(taskId), projectId: task.project_id });
     }
     if (projectId) {
+      const proj = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+      if (!proj) return res.status(404).json({ error: 'Projeto não encontrado' });
       return res.json({ ...buildDashboard('project_id', projectId, true), scope: 'project', projectId: Number(projectId) });
     }
     return res.status(400).json({ error: 'taskId ou projectId é obrigatório' });

@@ -2,7 +2,9 @@
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import EnvSelect from '../components/EnvSelect.jsx';
+import ReportBugModal from '../components/ReportBugModal.jsx';
 import AgentChat from '../components/AgentChat.jsx';
 import { EXEC_RESULTS, toneFor } from '../utils.js';
 
@@ -26,20 +28,39 @@ export default function Execution({ type }) {
   const [bugForm, setBugForm] = useState(null);
   const [agentJob, setAgentJob] = useState(null);
   const [agentBusy, setAgentBusy] = useState(false);
+  const [execBusy, setExecBusy] = useState(false);
+  const [bugBusy, setBugBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [error, setError] = useState('');
+  const pollTimer = React.useRef(null);
+
+  React.useEffect(() => () => clearTimeout(pollTimer.current), []);
 
   const caseIds = new Set(cases.map((c) => c.id));
   const history = execs.filter((e) => caseIds.has(e.test_case_id));
   const automatedCount = cases.filter((c) => c.execution_mode === 'Automatizado').length;
   const canAgent = AGENT_TYPES.has(type);
+  const reqMap = new Map();
+  for (const c of cases) {
+    if (c.requirement_id) reqMap.set(c.requirement_id, { id: c.requirement_id, code: c.requirement_code, title: c.requirement_title });
+  }
+  const requirements = [...reqMap.values()];
 
   const openExecute = async (tc) => {
-    const d = await api.get('/test-cases/' + tc.id);
-    setTarget(d);
-    setExecForm({
-      environment: 'Homologação', tester: 'QA', result: 'Passou', actual_result: '', notes: '',
-      step_results: d.steps.map((s) => ({ order: s.order, actual: '', result: 'Passou' }))
-    });
+    if (execBusy) return;
+    setExecBusy(true);
+    try {
+      const d = await api.get('/test-cases/' + tc.id);
+      setTarget(d);
+      setExecForm({
+        environment: 'Homologação', tester: 'QA', result: 'Passou', actual_result: '', notes: '',
+        step_results: d.steps.map((s) => ({ order: s.order, actual: '', result: 'Passou' }))
+      });
+    } catch (e) {
+      setError(e.message || 'Falha ao carregar o caso.');
+    } finally {
+      setExecBusy(false);
+    }
   };
 
   const pollAgentJob = (jobId) => {
@@ -48,7 +69,7 @@ export default function Execution({ type }) {
         const job = await api.get('/agent-runs/' + jobId);
         setAgentJob(job);
         if (job.status === 'queued' || job.status === 'running') {
-          setTimeout(tick, 1000);
+          pollTimer.current = setTimeout(tick, 1000);
           return;
         }
         setAgentBusy(false);
@@ -59,7 +80,7 @@ export default function Execution({ type }) {
         setAgentJob((j) => j ? { ...j, status: 'error', error: 'Falha ao consultar status' } : j);
       }
     };
-    setTimeout(tick, 800);
+    pollTimer.current = setTimeout(tick, 800);
   };
 
   const startAgent = async (body) => {
@@ -116,22 +137,34 @@ export default function Execution({ type }) {
   };
 
   const submit = async () => {
-    const r = await api.post('/executions', {
-      project_id: current.id, task_id: taskId, test_case_id: target.id,
-      environment: execForm.environment, tester: execForm.tester, result: execForm.result,
-      actual_result: execForm.actual_result, notes: execForm.notes, step_results: execForm.step_results
-    });
-    params.delete('case');
-    setParams(params, { replace: true });
-    const failed = execForm.result === 'Falhou';
-    const data = { actual_result: execForm.actual_result, environment: execForm.environment };
-    setTarget(null); setExecForm(null);
-    refresh(); refreshExecs();
-    if (failed) openBug(r.id, target, data);
+    try {
+      const r = await api.post('/executions', {
+        project_id: current.id, task_id: taskId, test_case_id: target.id,
+        environment: execForm.environment, tester: execForm.tester, result: execForm.result,
+        actual_result: execForm.actual_result, notes: execForm.notes, step_results: execForm.step_results
+      });
+      params.delete('case');
+      setParams(params, { replace: true });
+      const failed = execForm.result === 'Falhou';
+      const data = { actual_result: execForm.actual_result, environment: execForm.environment };
+      setTarget(null); setExecForm(null);
+      refresh(); refreshExecs();
+      if (failed) openBug(r.id, target, data);
+    } catch (e) {
+      setError(e.message || 'Falha ao registrar execução.');
+    }
   };
 
   const openBug = async (executionId, tc, data = {}) => {
-    const detail = tc.steps && tc.steps.length ? tc : await api.get('/test-cases/' + tc.id);
+    let detail = tc;
+    if (!(tc.steps && tc.steps.length)) {
+      try {
+        detail = await api.get('/test-cases/' + tc.id);
+      } catch (e) {
+        setError(e.message || 'Falha ao carregar o caso.');
+        return;
+      }
+    }
     setBugForm({
       execution_id: executionId,
       test_case_id: detail.id,
@@ -148,9 +181,17 @@ export default function Execution({ type }) {
   };
 
   const submitBug = async () => {
-    await api.post('/bugs', { ...bugForm, project_id: current.id, task_id: taskId });
-    setBugForm(null);
-    refreshExecs();
+    if (bugBusy) return;
+    setBugBusy(true);
+    try {
+      await api.post('/bugs', { ...bugForm, project_id: current.id, task_id: taskId });
+      setBugForm(null);
+      refreshExecs();
+    } catch (e) {
+      setError(e.message || 'Falha ao registrar bug.');
+    } finally {
+      setBugBusy(false);
+    }
   };
 
   return (
@@ -165,7 +206,7 @@ export default function Execution({ type }) {
                 className="small"
                 disabled={agentBusy || automatedCount === 0}
                 title={automatedCount === 0 ? 'Nenhum caso Automatizado nesta aba' : 'Fila agent dos casos Automatizado'}
-                onClick={() => startAgent({ taskId: Number(taskId), type, headed: true })}
+                onClick={() => startAgent({ projectId: current.id, taskId: Number(taskId), type, headed: true })}
               >
                 {agentBusy ? 'Agent…' : `Agent (${automatedCount})`}
               </Btn>
@@ -182,6 +223,8 @@ export default function Execution({ type }) {
           onClose={() => setChatOpen(false)}
         />
       )}
+
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? <Loading /> : (
         <div className="table-wrap mb">
@@ -201,12 +244,12 @@ export default function Execution({ type }) {
                       <td>{last ? <Badge tone={toneFor(last.result)}>{last.result}</Badge> : '-'}</td>
                       <td>
                         <div className="row-actions">
-                          <Btn className="small" onClick={() => openExecute(tc)}>Executar</Btn>
+                          <Btn className="small" disabled={execBusy} onClick={() => openExecute(tc)}>Executar</Btn>
                           {canAgent && (
                             <Btn
                               className="ghost small"
                               disabled={agentBusy}
-                              onClick={() => startAgent({ caseId: tc.id, headed: true })}
+                              onClick={() => startAgent({ projectId: current.id, caseId: tc.id, headed: true })}
                             >
                               Agent
                             </Btn>
@@ -238,7 +281,7 @@ export default function Execution({ type }) {
                     <td>{e.bugs_count}</td>
                     <td>
                       <div className="row-actions">
-                        <Btn className="ghost small" onClick={() => api.get('/executions/' + e.id).then(setViewing)}>Ver</Btn>
+                        <Btn className="ghost small" onClick={() => api.get('/executions/' + e.id).then(setViewing).catch((er) => setError(er.message || 'Falha ao carregar execução.'))}>Ver</Btn>
                         {e.result === 'Falhou' && <Btn className="danger small" onClick={() => openBug(e.id, { id: e.test_case_id, steps: [] }, e)}>Reportar bug</Btn>}
                       </div>
                     </td>
@@ -258,9 +301,7 @@ export default function Execution({ type }) {
             )}
             <div className="grid3">
               <Field label="Ambiente">
-                <Select value={execForm.environment} onChange={(e) => setExecForm({ ...execForm, environment: e.target.value })}>
-                  <option>Homologação</option><option>Staging</option><option>Produção</option><option>Local</option>
-                </Select>
+                <EnvSelect value={execForm.environment} onChange={(e) => setExecForm({ ...execForm, environment: e.target.value })} />
               </Field>
               <Field label="Executado por"><Input value={execForm.tester} onChange={(e) => setExecForm({ ...execForm, tester: e.target.value })} /></Field>
               <Field label="Resultado">
@@ -295,7 +336,7 @@ export default function Execution({ type }) {
             <div className="modal-foot-inline">
               <Btn className="gray" onClick={() => { setTarget(null); setExecForm(null); }}>Cancelar</Btn>
               {canAgent && (
-                <Btn className="ghost" disabled={agentBusy} onClick={() => { const id = target.id; setTarget(null); setExecForm(null); startAgent({ caseId: id, headed: true }); }}>
+                <Btn className="ghost" disabled={agentBusy} onClick={() => { const id = target.id; setTarget(null); setExecForm(null); startAgent({ projectId: current.id, caseId: id, headed: true }); }}>
                   Executar com agent
                 </Btn>
               )}
@@ -330,52 +371,22 @@ export default function Execution({ type }) {
               </div>
             ))}
             <div className="row-actions mt">
-              <Btn className="ghost small" onClick={() => { const id = viewing.id; setViewing(null); api.get('/executions/' + id).then(setViewing); }}>Recarregar</Btn>
+              <Btn className="ghost small" onClick={() => { const id = viewing.id; setViewing(null); api.get('/executions/' + id).then(setViewing).catch((er) => setError(er.message || 'Falha ao recarregar execução.')); }}>Recarregar</Btn>
               {viewing.result === 'Falhou' && <Btn className="danger small" onClick={() => openBug(viewing.id, { id: viewing.test_case_id, steps: [] }, viewing)}>Reportar bug</Btn>}
             </div>
           </>
         )}
       </Modal>
 
-      <Modal open={!!bugForm} onClose={() => setBugForm(null)} title="Reportar bug" width={720}>
-        {bugForm && (
-          <>
-            <div className="highlight">Bug gerado a partir de uma execução falha. Ajuste os campos e confirme.</div>
-            <Field label="Título" required><Input value={bugForm.title} onChange={(e) => setBugForm({ ...bugForm, title: e.target.value })} /></Field>
-            <div className="grid2">
-              <Field label="Severidade">
-                <Select value={bugForm.severity} onChange={(e) => setBugForm({ ...bugForm, severity: e.target.value })}>
-                  <option>Blocker</option><option>Alta</option><option>Média</option><option>Baixa</option>
-                </Select>
-              </Field>
-              <Field label="Prioridade">
-                <Select value={bugForm.priority} onChange={(e) => setBugForm({ ...bugForm, priority: e.target.value })}>
-                  <option>Alta</option><option>Média</option><option>Baixa</option>
-                </Select>
-              </Field>
-            </div>
-            <div className="grid2">
-              <Field label="Ambiente"><Input value={bugForm.environment} onChange={(e) => setBugForm({ ...bugForm, environment: e.target.value })} /></Field>
-              <Field label="Requisito">
-                <Select value={bugForm.requirement_id} onChange={(e) => setBugForm({ ...bugForm, requirement_id: e.target.value })}>
-                  <option value="">Nenhum</option>
-                  {cases.filter((c) => c.requirement_id).map((c) => <option key={c.requirement_id} value={c.requirement_id}>{c.requirement_code}</option>)}
-                </Select>
-              </Field>
-            </div>
-            <Field label="Descrição"><Textarea value={bugForm.description} onChange={(e) => setBugForm({ ...bugForm, description: e.target.value })} /></Field>
-            <Field label="Passos para reproduzir"><Textarea className="mono" rows={4} value={bugForm.steps_to_reproduce} onChange={(e) => setBugForm({ ...bugForm, steps_to_reproduce: e.target.value })} /></Field>
-            <div className="grid2">
-              <Field label="Resultado esperado"><Textarea value={bugForm.expected_result} onChange={(e) => setBugForm({ ...bugForm, expected_result: e.target.value })} /></Field>
-              <Field label="Resultado obtido"><Textarea value={bugForm.actual_result} onChange={(e) => setBugForm({ ...bugForm, actual_result: e.target.value })} /></Field>
-            </div>
-            <div className="modal-foot-inline">
-              <Btn className="gray" onClick={() => setBugForm(null)}>Cancelar</Btn>
-              <Btn className="danger" onClick={submitBug}>Registrar bug</Btn>
-            </div>
-          </>
-        )}
-      </Modal>
+      <ReportBugModal
+        form={bugForm}
+        busy={bugBusy}
+        onChange={(patch) => setBugForm({ ...bugForm, ...patch })}
+        onCancel={() => setBugForm(null)}
+        onSubmit={submitBug}
+        context="Bug gerado a partir de uma execução falha. Ajuste os campos e confirme."
+        requirements={requirements}
+      />
     </div>
   );
 }

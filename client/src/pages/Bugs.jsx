@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import { BUG_STATUS, SEVERITIES, toneFor } from '../utils.js';
 
 const blank = {
@@ -24,6 +24,7 @@ export default function Bugs() {
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fSeverity, setFSeverity] = useState('');
+  const [error, run] = useAction();
 
   React.useEffect(() => {
     if (taskId) api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
@@ -44,17 +45,21 @@ export default function Bugs() {
 
   const save = async () => {
     if (!form.title.trim()) return;
-    if (editing) await api.put('/bugs/' + editing.id, form);
-    else await api.post('/bugs', { ...form, project_id: current.id, task_id: taskId });
-    refresh();
-    setCreating(false); setEditing(null);
+    await run(async () => {
+      if (editing) await api.put('/bugs/' + editing.id, form);
+      else await api.post('/bugs', { ...form, project_id: current.id, task_id: taskId });
+      refresh();
+      setCreating(false); setEditing(null);
+    });
   };
 
   const remove = async (b) => {
     if (!window.confirm(`Excluir o bug ${b.code}?`)) return;
-    await api.del('/bugs/' + b.id);
-    refresh();
-    if (detail?.id === b.id) setDetail(null);
+    await run(async () => {
+      await api.del('/bugs/' + b.id);
+      refresh();
+      if (detail?.id === b.id) setDetail(null);
+    });
   };
 
   const loadDetail = async (id) => {
@@ -63,23 +68,29 @@ export default function Bugs() {
   };
 
   const addRetest = async () => {
-    await api.post(`/bugs/${detail.id}/retests`, retestForm);
-    setRetestForm(null);
-    loadDetail(detail.id);
-    refresh();
+    await run(async () => {
+      await api.post(`/bugs/${detail.id}/retests`, retestForm);
+      setRetestForm(null);
+      loadDetail(detail.id);
+      refresh();
+    });
   };
 
   const delRetest = async (rt) => {
     if (!window.confirm('Excluir este reteste?')) return;
-    await api.del(`/bugs/retests/${rt.id}`);
-    loadDetail(detail.id);
-    refresh();
+    await run(async () => {
+      await api.del(`/bugs/retests/${rt.id}`);
+      loadDetail(detail.id);
+      refresh();
+    });
   };
 
   const setStatus = async (b, status) => {
-    await api.put('/bugs/' + b.id, { ...b, status });
-    refresh();
-    if (detail?.id === b.id) loadDetail(b.id);
+    await run(async () => {
+      await api.put('/bugs/' + b.id, { ...b, status });
+      refresh();
+      if (detail?.id === b.id) loadDetail(b.id);
+    });
   };
 
   return (
@@ -88,6 +99,7 @@ export default function Bugs() {
         title="Bugs"
         actions={<Btn onClick={openCreate}>Novo bug</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel mb">
         <div className="grid3">

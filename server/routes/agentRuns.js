@@ -8,6 +8,23 @@ const ROOT = path.join(__dirname, '..', '..');
 const RUNNER = path.join(ROOT, 'agent-runner');
 const jobs = new Map();
 const MAX_JOBS = 50;
+const ALLOWED_TYPES = new Set(['Fumaça', 'Funcional', 'API']);
+const ALLOWED_AGENTS = new Set(['opencode', 'cursor']);
+const MAX_JOB_MS = Number(process.env.AGENT_JOB_TIMEOUT_MS) || 30 * 60 * 1000;
+
+/** Redige dados sensíveis dos logs antes de expô-los via API. */
+function sanitizeLog(log) {
+  return String(log || '')
+    .replace(/(senha|password|passwd|token|secret|api[_-]?key)\s*[:=]\s*\S+/gi, '$1=***')
+    .replace(/Bearer\s+\S+/gi, 'Bearer ***')
+    .replace(/(x-goog-api-key|x-app-token)\s*:\s*\S+/gi, '$1: ***');
+}
+
+function killJob(job) {
+  if (job.pid) {
+    try { process.kill(job.pid, 'SIGTERM'); } catch { /* processo já encerrado */ }
+  }
+}
 
 function trimJobs() {
   if (jobs.size <= MAX_JOBS) return;
@@ -49,9 +66,24 @@ function spawnRunner(job, args) {
     windowsHide: !headed
   });
   job.pid = child.pid;
+
+  job.timeoutTimer = setTimeout(() => {
+    if (job.status === 'running' || job.status === 'queued') {
+      killJob(job);
+      job.status = 'error';
+      job.phase = 'timeout';
+      job.error = `Job excedeu o limite de ${Math.round(MAX_JOB_MS / 1000 / 60)} min`;
+      job.finishedAt = Date.now();
+      job.waitingSso = false;
+      clearSsoMarker();
+    }
+  }, MAX_JOB_MS);
+  job.timeoutTimer.unref?.();
+
   child.stdout.on('data', (d) => appendLog(job, d.toString()));
   child.stderr.on('data', (d) => appendLog(job, d.toString()));
   child.on('error', (err) => {
+    clearTimeout(job.timeoutTimer);
     job.status = 'error';
     job.phase = 'error';
     job.error = err.message;
@@ -59,6 +91,7 @@ function spawnRunner(job, args) {
     job.waitingSso = false;
   });
   child.on('close', (code) => {
+    clearTimeout(job.timeoutTimer);
     job.exitCode = code ?? 1;
     job.status = code === 0 ? 'done' : 'error';
     job.phase = job.status;
@@ -76,14 +109,14 @@ module.exports = (db) => {
     const list = [...jobs.values()]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, 30)
-      .map(({ log, ...rest }) => ({ ...rest, logPreview: (log || '').slice(-500) }));
+      .map(({ log, ...rest }) => ({ ...rest, logPreview: sanitizeLog(log).slice(-500) }));
     res.json(list);
   });
 
   router.get('/:id', (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job não encontrado' });
-    res.json(job);
+    res.json({ ...job, log: sanitizeLog(job.log) });
   });
 
   /** QA confirms SSO/login done — unblocks waitForManualLogin in Playwright */
@@ -101,20 +134,38 @@ module.exports = (db) => {
   });
 
   router.post('/', (req, res) => {
-    const { caseId, taskId, type, agent, headed, allModes } = req.body || {};
+    const { caseId, taskId, type, agent, headed, allModes, projectId } = req.body || {};
     if (!caseId && !taskId) {
       return res.status(400).json({ error: 'Informe caseId ou taskId' });
     }
+
+    let resolvedProjectId = projectId ? Number(projectId) : null;
+
     if (caseId) {
-      const tc = db.prepare('SELECT id, type, code FROM test_cases WHERE id = ?').get(caseId);
+      const tc = db.prepare('SELECT id, type, code, project_id, task_id FROM test_cases WHERE id = ?').get(caseId);
       if (!tc) return res.status(404).json({ error: 'Caso não encontrado' });
-      if (!['Fumaça', 'Funcional', 'API'].includes(tc.type)) {
+      if (!ALLOWED_TYPES.has(tc.type)) {
         return res.status(400).json({ error: `Tipo ${tc.type} não suportado pelo agent` });
       }
+      if (resolvedProjectId && Number(tc.project_id) !== resolvedProjectId) {
+        return res.status(400).json({ error: 'Caso não pertence ao projeto informado' });
+      }
+      resolvedProjectId = tc.project_id;
     }
     if (taskId) {
-      const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId);
+      const task = db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(taskId);
       if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
+      if (resolvedProjectId && Number(task.project_id) !== resolvedProjectId) {
+        return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
+      }
+      resolvedProjectId = task.project_id;
+    }
+    if (type && !ALLOWED_TYPES.has(type)) {
+      return res.status(400).json({ error: `Tipo inválido: ${type}` });
+    }
+    const agentKey = agent || process.env.AGENT || 'opencode';
+    if (!ALLOWED_AGENTS.has(agentKey)) {
+      return res.status(400).json({ error: `Agente inválido: ${agentKey}` });
     }
 
     const running = [...jobs.values()].some((j) => j.status === 'running' || j.status === 'queued');
@@ -128,7 +179,7 @@ module.exports = (db) => {
     if (caseId) args.push(`--caseId=${caseId}`);
     if (taskId) args.push(`--taskId=${taskId}`);
     if (type) args.push(`--type=${type}`);
-    if (agent) args.push(`--agent=${agent}`);
+    args.push(`--agent=${agentKey}`);
     args.push(useHeaded ? '--headed' : '--headless');
     if (allModes) args.push('--all-modes');
 
@@ -140,7 +191,7 @@ module.exports = (db) => {
       caseId: caseId || null,
       taskId: taskId || null,
       type: type || null,
-      agent: agent || process.env.AGENT || 'opencode',
+      agent: agentKey,
       headed: useHeaded,
       args,
       log: '',
@@ -155,8 +206,14 @@ module.exports = (db) => {
     trimJobs();
 
     setImmediate(() => spawnRunner(job, args));
-    res.status(202).json({ id, status: job.status, phase: job.phase, message: 'Agent run iniciado' });
+    res.status(201).json({ id, status: job.status, phase: job.phase, message: 'Agent run iniciado' });
   });
 
   return router;
+};
+
+module.exports.killAll = () => {
+  for (const job of jobs.values()) {
+    if (job.status === 'running' || job.status === 'queued') killJob(job);
+  }
 };

@@ -5,6 +5,7 @@ module.exports = (db) => {
 
   router.get('/', (req, res) => {
     const { projectId } = req.query;
+    if (!projectId) return res.status(400).json({ error: 'projectId é obrigatório' });
     res.json(db.prepare(`
       SELECT r.*,
         (SELECT COUNT(*) FROM release_requirements rr WHERE rr.release_id = r.id) AS requirements_count,
@@ -52,29 +53,38 @@ module.exports = (db) => {
     if (!project_id || !name) return res.status(400).json({ error: 'Projeto e nome são obrigatórios' });
     const r = db.prepare('INSERT INTO releases (project_id, name, version, release_date, status, notes) VALUES (?,?,?,?,?,?)')
       .run(project_id, name, version, release_date, status, notes);
-    res.json({ id: Number(r.lastInsertRowid) });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
 
   router.put('/:id', (req, res) => {
     const { name, version, release_date, status, notes } = req.body || {};
+    const row = db.prepare('SELECT id FROM releases WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Release não encontrada' });
     db.prepare("UPDATE releases SET name=?, version=?, release_date=?, status=?, notes=?, updated_at=datetime('now') WHERE id=?")
       .run(name, version, release_date, status, notes, req.params.id);
     res.json({ ok: true });
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM releases WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Release não encontrada' });
     db.prepare('DELETE FROM releases WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });
 
   router.post('/:id/requirements', (req, res) => {
     const { requirement_id } = req.body || {};
+    const release = db.prepare('SELECT id FROM releases WHERE id=?').get(req.params.id);
+    if (!release) return res.status(404).json({ error: 'Release não encontrada' });
     db.prepare('INSERT OR IGNORE INTO release_requirements (release_id, requirement_id) VALUES (?,?)')
       .run(req.params.id, requirement_id);
-    res.json({ ok: true });
+    res.status(201).json({ ok: true });
   });
 
   router.delete('/:id/requirements/:requirementId', (req, res) => {
+    const row = db.prepare('SELECT id FROM release_requirements WHERE release_id=? AND requirement_id=?')
+      .get(req.params.id, req.params.requirementId);
+    if (!row) return res.status(404).json({ error: 'Vínculo não encontrado' });
     db.prepare('DELETE FROM release_requirements WHERE release_id=? AND requirement_id=?')
       .run(req.params.id, req.params.requirementId);
     res.json({ ok: true });

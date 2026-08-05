@@ -7,14 +7,22 @@ module.exports = (db) => {
     res.json(db.prepare('SELECT * FROM projects ORDER BY name').all());
   });
 
+  router.get('/:id', (req, res) => {
+    const row = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Projeto não encontrado' });
+    res.json(row);
+  });
+
   router.post('/', (req, res) => {
     const { name, description = '', system = '' } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
     const r = db.prepare('INSERT INTO projects (name, description, system) VALUES (?,?,?)').run(name, description, system);
-    res.json({ id: Number(r.lastInsertRowid) });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
 
   router.put('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM projects WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Projeto não encontrado' });
     const { name, description, system, status } = req.body || {};
     db.prepare("UPDATE projects SET name=?, description=?, system=?, status=?, updated_at=datetime('now') WHERE id=?")
       .run(name, description, system, status, req.params.id);
@@ -22,6 +30,8 @@ module.exports = (db) => {
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM projects WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Projeto não encontrado' });
     db.prepare('DELETE FROM projects WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });

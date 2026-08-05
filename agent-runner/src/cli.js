@@ -5,9 +5,14 @@ const fs = require('fs');
 const ROOT = path.join(__dirname, '..');
 
 try {
-  require('dotenv').config({ path: path.join(ROOT, '.env') });
+  const res = require('dotenv').config({ path: path.join(ROOT, '.env') });
   require('dotenv').config({ path: path.join(ROOT, '..', '.env') });
-} catch { /* ignore */ }
+  if (res.error) {
+    console.warn('[agent-runner] dotenv: ' + res.error.message);
+  }
+} catch (err) {
+  console.warn('[agent-runner] dotenv ignorado:', err.message);
+}
 
 const api = require('./studioApi');
 const { parseArgs } = require('./utils');

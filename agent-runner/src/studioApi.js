@@ -1,18 +1,44 @@
 const BASE = (process.env.QA_API_BASE || 'http://localhost:3001/api').replace(/\/$/, '');
 
-async function request(path, options = {}) {
-  const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
-  });
+const TIMEOUT_MS = Number(process.env.QA_API_TIMEOUT_MS) || 30_000;
+const MAX_RETRIES = Number(process.env.QA_API_RETRIES) || 2;
+
+const appToken = process.env.QA_APP_TOKEN || process.env.APP_TOKEN || '';
+
+async function fetchWithTimeout(path, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(BASE + path, {
+      method: options.method || 'GET',
+      headers: { 'Content-Type': 'application/json', ...(appToken ? { 'x-app-token': appToken } : {}), ...(options.headers || {}) },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function request(path, options = {}, attempt = 0) {
+  let res;
+  try {
+    res = await fetchWithTimeout(path, options);
+  } catch (err) {
+    if (attempt < MAX_RETRIES && err.name === 'AbortError') {
+      return request(path, options, attempt + 1);
+    }
+    throw new Error(
+      `API ${options.method || 'GET'} ${path}: não foi possível conectar a ${BASE} (${err.name === 'AbortError' ? `timeout após ${TIMEOUT_MS}ms` : err.message})`
+    );
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try {
       const j = await res.json();
       msg = j.error || msg;
     } catch { /* ignore */ }
-    throw new Error(`API ${options.method || 'GET'} ${path}: ${msg}`);
+    throw new Error(`API ${options.method || 'GET'} ${path}: HTTP ${res.status} — ${msg}`);
   }
   if (res.status === 204) return null;
   return res.json();

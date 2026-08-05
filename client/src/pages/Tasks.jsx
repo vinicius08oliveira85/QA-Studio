@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
 import { PRIORITIES, toneFor } from '../utils.js';
 
 export const TASK_STATUS = ['Aberta', 'Em Andamento', 'Em Homologação', 'Concluída', 'Cancelada'];
@@ -23,6 +23,7 @@ export default function Tasks() {
   const [fStatus, setFStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [error, setError] = useState('');
   const [form, setForm] = useState({
     code: '', title: '', description: '', status: 'Aberta', priority: 'Média', assignee: ''
   });
@@ -47,22 +48,27 @@ export default function Tasks() {
 
   const save = async () => {
     if (!form.title.trim()) return;
-    if (editing) {
-      await api.put('/tasks/' + editing.id, form);
-    } else {
-      await api.post('/tasks', { ...form, project_id: current.id });
-    }
-    await refreshTasks(current.id);
-    refresh();
-    setCreating(false);
-    setEditing(null);
+    try {
+      if (editing) {
+        await api.put('/tasks/' + editing.id, form);
+      } else {
+        await api.post('/tasks', { ...form, project_id: current.id });
+      }
+      await refreshTasks(current.id);
+      refresh();
+      setError('');
+      setCreating(false);
+      setEditing(null);
+    } catch (e) { setError(e.message || 'Falha ao salvar tarefa.'); }
   };
 
   const remove = async (t) => {
     if (!window.confirm(`Excluir a tarefa ${t.code}? Todo o conteúdo vinculado será removido.`)) return;
-    await api.del('/tasks/' + t.id);
-    await refreshTasks(current.id);
-    refresh();
+    try {
+      await api.del('/tasks/' + t.id);
+      await refreshTasks(current.id);
+      refresh();
+    } catch (e) { setError(e.message || 'Falha ao excluir tarefa.'); }
   };
 
   const openTask = (t) => {
@@ -78,6 +84,7 @@ export default function Tasks() {
         title="Tarefas"
         actions={<Btn onClick={openCreate}>+ Nova tarefa</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="toolbar">
         <Input placeholder="Buscar código, título..." value={q} onChange={(e) => setQ(e.target.value)} />

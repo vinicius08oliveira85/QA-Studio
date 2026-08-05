@@ -1,4 +1,5 @@
 const express = require('express');
+const { validateTaskOwnership } = require('../helpers');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -54,12 +55,10 @@ module.exports = (db) => {
       priority = 'Média', type = 'Funcional', execution_mode = 'Manual', status = 'Pronto',
       preconditions = '', steps = [], regression_relevant = 0, automated = 0, automation_tool = '', source = 'manual' } = req.body || {};
     if (!task_id || !title) return res.status(400).json({ error: 'Tarefa e título são obrigatórios' });
-    const task = db.resolveTask(task_id);
-    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
-    const projectId = project_id || task.project_id;
-    if (Number(projectId) !== Number(task.project_id)) {
-      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
-    }
+    if (!Array.isArray(steps)) return res.status(400).json({ error: 'steps deve ser uma lista' });
+    const owned = validateTaskOwnership(db, task_id, project_id);
+    if (owned.error) return res.status(owned.status).json({ error: owned.error });
+    const projectId = project_id || owned.task.project_id;
     const c = code || db.nextCode('test_cases', 'TC', projectId);
     const r = db.prepare(
       `INSERT INTO test_cases (project_id, task_id, scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode, status, preconditions, steps, regression_relevant, automated, automation_tool, source)
@@ -67,15 +66,19 @@ module.exports = (db) => {
     ).run(projectId, task_id, scenario_id || null, requirement_id || null, strategy_id || null, c, title,
       priority, type, execution_mode, status, preconditions, JSON.stringify(steps || []),
       regression_relevant ? 1 : 0, automated ? 1 : 0, automation_tool || '', source);
-    res.json({ id: Number(r.lastInsertRowid), code: c });
+    res.status(201).json({ id: Number(r.lastInsertRowid), code: c });
   });
 
   router.put('/:id', (req, res) => {
     const { scenario_id, requirement_id, strategy_id, code, title, priority, type, execution_mode,
       status, preconditions, steps, regression_relevant, automated, automation_tool, source } = req.body || {};
+    const cur = db.prepare('SELECT source FROM test_cases WHERE id=?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Caso de teste não encontrado' });
+    if (steps !== undefined && typeof steps !== 'string' && !Array.isArray(steps)) {
+      return res.status(400).json({ error: 'steps deve ser uma lista' });
+    }
     let stepsArr = steps;
     if (typeof steps === 'string') { try { stepsArr = JSON.parse(steps); } catch { stepsArr = []; } }
-    const cur = db.prepare('SELECT source FROM test_cases WHERE id=?').get(req.params.id);
     const finalSource = source !== undefined ? source : (cur?.source || 'manual');
     db.prepare(
       `UPDATE test_cases SET scenario_id=?, requirement_id=?, strategy_id=?, code=?, title=?, priority=?,
@@ -88,6 +91,8 @@ module.exports = (db) => {
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM test_cases WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Caso de teste não encontrado' });
     db.prepare('DELETE FROM test_cases WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });
@@ -141,11 +146,15 @@ module.exports = (db) => {
 
   router.put('/test-mass/:mid', (req, res) => {
     const { name, data, purpose } = req.body || {};
+    const row = db.prepare('SELECT id FROM test_mass WHERE id=?').get(req.params.mid);
+    if (!row) return res.status(404).json({ error: 'Massa de teste não encontrada' });
     db.prepare('UPDATE test_mass SET name=?, data=?, purpose=? WHERE id=?').run(name, data, purpose, req.params.mid);
     res.json({ ok: true });
   });
 
   router.delete('/test-mass/:mid', (req, res) => {
+    const row = db.prepare('SELECT id FROM test_mass WHERE id=?').get(req.params.mid);
+    if (!row) return res.status(404).json({ error: 'Massa de teste não encontrada' });
     db.prepare('DELETE FROM test_mass WHERE id=?').run(req.params.mid);
     res.json({ ok: true });
   });

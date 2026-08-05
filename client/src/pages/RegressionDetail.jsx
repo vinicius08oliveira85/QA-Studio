@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Loading, Modal, Select, Textarea } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Loading, Select } from '../components/ui.jsx';
+import ReportBugModal from '../components/ReportBugModal.jsx';
 import { toneFor } from '../utils.js';
 
 export default function RegressionDetail() {
@@ -12,22 +13,27 @@ export default function RegressionDetail() {
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bugForm, setBugForm] = useState(null);
+  const [error, setError] = useState('');
 
   const load = React.useCallback(async () => {
     const d = await api.get('/regressions/' + id);
     setRun(d);
     setLoading(false);
   }, [id]);
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => { load().catch((e) => { setError(e.message || 'Falha ao carregar regressão.'); setLoading(false); }); }, [load]);
 
   const setResult = async (rc, result) => {
-    await api.put('/regressions/cases/' + rc.id, { result, notes: rc.notes });
-    load();
+    try {
+      await api.put('/regressions/cases/' + rc.id, { result, notes: rc.notes });
+      load();
+    } catch (e) { setError(e.message || 'Falha ao atualizar resultado.'); }
   };
 
   const addCase = async (tc) => {
-    await api.post(`/regressions/${id}/cases`, { test_case_id: tc.id });
-    load();
+    try {
+      await api.post(`/regressions/${id}/cases`, { test_case_id: tc.id });
+      load();
+    } catch (e) { setError(e.message || 'Falha ao adicionar caso.'); }
   };
 
   const populate = async () => {
@@ -54,8 +60,10 @@ export default function RegressionDetail() {
   };
 
   const submitBug = async () => {
-    await api.post('/bugs', { ...bugForm, project_id: current.id });
-    setBugForm(null);
+    try {
+      await api.post('/bugs', { ...bugForm, project_id: current.id });
+      setBugForm(null);
+    } catch (e) { setError(e.message || 'Falha ao registrar bug.'); }
   };
 
   if (loading) return <Loading />;
@@ -76,6 +84,7 @@ export default function RegressionDetail() {
           </>
         }
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
       {(run.environment || run.notes) && (
         <div className="muted small mb" style={{ marginTop: -8 }}>
           {[run.environment && `Ambiente: ${run.environment}`, run.notes].filter(Boolean).join(' · ')}
@@ -141,35 +150,13 @@ export default function RegressionDetail() {
         )}
       </div>
 
-      <Modal open={!!bugForm} onClose={() => setBugForm(null)} title="Reportar bug na regressão" width={680}>
-        {bugForm && (
-          <>
-            <div className="highlight">Bug vinculado à regressão "{run.name}".</div>
-            <Field label="Título" required><Textarea rows={2} value={bugForm.title} onChange={(e) => setBugForm({ ...bugForm, title: e.target.value })} /></Field>
-            <div className="grid2">
-              <Field label="Severidade">
-                <Select value={bugForm.severity} onChange={(e) => setBugForm({ ...bugForm, severity: e.target.value })}>
-                  <option>Blocker</option><option>Alta</option><option>Média</option><option>Baixa</option>
-                </Select>
-              </Field>
-              <Field label="Prioridade">
-                <Select value={bugForm.priority} onChange={(e) => setBugForm({ ...bugForm, priority: e.target.value })}>
-                  <option>Alta</option><option>Média</option><option>Baixa</option>
-                </Select>
-              </Field>
-            </div>
-            <Field label="Descrição / evidências"><Textarea value={bugForm.description} onChange={(e) => setBugForm({ ...bugForm, description: e.target.value })} /></Field>
-            <div className="grid2">
-              <Field label="Resultado esperado"><Textarea value={bugForm.expected_result} onChange={(e) => setBugForm({ ...bugForm, expected_result: e.target.value })} /></Field>
-              <Field label="Resultado obtido"><Textarea value={bugForm.actual_result} onChange={(e) => setBugForm({ ...bugForm, actual_result: e.target.value })} /></Field>
-            </div>
-            <div className="modal-foot-inline">
-              <Btn className="gray" onClick={() => setBugForm(null)}>Cancelar</Btn>
-              <Btn className="danger" onClick={submitBug}>Registrar bug</Btn>
-            </div>
-          </>
-        )}
-      </Modal>
+      <ReportBugModal
+        form={bugForm}
+        onChange={(patch) => setBugForm({ ...bugForm, ...patch })}
+        onCancel={() => setBugForm(null)}
+        onSubmit={submitBug}
+        context={`Bug vinculado à regressão "${run.name}".`}
+      />
     </div>
   );
 }

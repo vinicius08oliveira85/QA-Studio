@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import { RELEASE_STATUS, toneFor } from '../utils.js';
 
 export default function Releases() {
@@ -12,19 +12,24 @@ export default function Releases() {
   ));
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', version: '', release_date: '', status: 'Em Homologação', notes: '' });
+  const [error, run] = useAction();
 
   const save = async () => {
     if (!form.name.trim()) return;
-    await api.post('/releases', { ...form, project_id: current.id });
-    refresh();
-    setCreating(false);
-    setForm({ name: '', version: '', release_date: '', status: 'Em Homologação', notes: '' });
+    await run(async () => {
+      await api.post('/releases', { ...form, project_id: current.id });
+      refresh();
+      setCreating(false);
+      setForm({ name: '', version: '', release_date: '', status: 'Em Homologação', notes: '' });
+    });
   };
 
   const remove = async (r) => {
     if (!window.confirm(`Excluir a release "${r.name}"?`)) return;
-    await api.del('/releases/' + r.id);
-    refresh();
+    await run(async () => {
+      await api.del('/releases/' + r.id);
+      refresh();
+    });
   };
 
   return (
@@ -33,6 +38,7 @@ export default function Releases() {
         title="Homologação"
         actions={<Btn onClick={() => setCreating(true)}>Nova release</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? <Loading /> : items.length === 0 ? (
         <Empty>Crie uma release para consolidar requisitos, execuções e bugs na decisão de liberação.</Empty>

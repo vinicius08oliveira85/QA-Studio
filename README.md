@@ -28,6 +28,21 @@ Abra http://localhost:3001 (produção) ou http://localhost:5173 (dev).
 
 Os dados ficam no arquivo local `data/qa.db` (SQLite). Uso pessoal, sem login.
 
+## Variáveis de ambiente (opcionais)
+
+| Variável | Onde | Padrão | Efeito |
+|---|---|---|---|
+| `PORT` | servidor | `3001` | Porta da API |
+| `APP_TOKEN` | servidor | — | Exige header `x-app-token` em `/api` (acesso remoto) |
+| `CORS_ORIGIN` | servidor | — | Habilita CORS para o client em outra origem |
+| `GEMINI_TIMEOUT_MS` | servidor | `60000` | Timeout do fetch à API Gemini |
+| `QA_API_BASE` | tests / agent-runner | `http://localhost:3001/api` | URL da API para `scripts/test-api.js` |
+| `QA_APP_TOKEN` | agent-runner | — | Enviado como `x-app-token` ao chamar a API |
+| `QA_API_TIMEOUT_MS` / `QA_API_RETRIES` | agent-runner | `30000` / `0` | Timeout e tentativas do client HTTP do runner |
+| `TARGET_BASE_URL` | agent-runner | — | App/API sob teste (obrigatória na CLI) |
+| `PLAYWRIGHT_TIMEOUT_MS` | agent-runner | `900000` | Timeout do Chromium; encerra o processo se estourar |
+| `ARTIFACT_MAX_BYTES` | agent-runner | `10485760` | Tamanho máximo de artefato persistido em `specs/` |
+
 ## As 5 seções (integradas entre si)
 
 1. **Análise de Requisitos e Planejamento**

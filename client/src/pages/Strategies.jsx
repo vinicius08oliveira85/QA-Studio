@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { toneFor } from '../utils.js';
 
@@ -18,6 +18,7 @@ export default function Strategies() {
   const [form, setForm] = useState(blank);
   const [detail, setDetail] = useState(null);
   const [reqs, setReqs] = useState([]);
+  const [error, run] = useAction();
 
   React.useEffect(() => {
     if (taskId) api.get('/requirements?taskId=' + taskId).then(setReqs).catch(() => {});
@@ -28,16 +29,20 @@ export default function Strategies() {
 
   const save = async () => {
     if (!form.name.trim()) return;
-    if (editing) await api.put('/strategies/' + editing.id, form);
-    else await api.post('/strategies', { ...form, project_id: current.id, task_id: taskId });
-    refresh();
-    setCreating(false); setEditing(null);
+    await run(async () => {
+      if (editing) await api.put('/strategies/' + editing.id, form);
+      else await api.post('/strategies', { ...form, project_id: current.id, task_id: taskId });
+      refresh();
+      setCreating(false); setEditing(null);
+    });
   };
 
   const remove = async (s) => {
     if (!window.confirm(`Excluir a estratégia "${s.name}"?`)) return;
-    await api.del('/strategies/' + s.id);
-    refresh();
+    await run(async () => {
+      await api.del('/strategies/' + s.id);
+      refresh();
+    });
   };
 
   const shortName = (s) => {
@@ -58,6 +63,7 @@ export default function Strategies() {
           <Btn onClick={openCreate}>Nova estratégia</Btn>
         </>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {loading ? <Loading /> : items.length === 0 ? (
         <Empty>Nenhuma estratégia nesta tarefa.</Empty>

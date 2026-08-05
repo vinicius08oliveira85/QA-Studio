@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api, fmtDateShort } from '../api.js';
-import { Btn, Empty, Field, Header, Input, Loading, Modal, Textarea, useList } from '../components/ui.jsx';
+import { Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Textarea, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 
 export default function TestMass() {
@@ -13,6 +13,7 @@ export default function TestMass() {
   const [editing, setEditing] = useState(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [form, setForm] = useState({ name: '', data: '', purpose: '' });
+  const [error, setError] = useState('');
 
   const filtered = items.filter((m) =>
     `${m.name} ${m.test_case_code} ${m.test_case_title} ${m.data} ${m.purpose}`.toLowerCase().includes(q.toLowerCase())
@@ -25,15 +26,20 @@ export default function TestMass() {
 
   const save = async () => {
     if (!form.name.trim() || !editing) return;
-    await api.put(`/test-cases/test-mass/${editing.id}`, form);
-    refresh();
-    setEditing(null);
+    try {
+      await api.put(`/test-cases/test-mass/${editing.id}`, form);
+      refresh();
+      setError('');
+      setEditing(null);
+    } catch (e) { setError(e.message || 'Falha ao salvar massa.'); }
   };
 
   const del = async (m) => {
     if (!window.confirm('Excluir esta massa?')) return;
-    await api.del(`/test-cases/test-mass/${m.id}`);
-    refresh();
+    try {
+      await api.del(`/test-cases/test-mass/${m.id}`);
+      refresh();
+    } catch (e) { setError(e.message || 'Falha ao excluir massa.'); }
   };
 
   return (
@@ -42,6 +48,7 @@ export default function TestMass() {
         title="Massa"
         actions={<Btn className="ghost" onClick={() => setAiOpen(true)}>Gerar com IA</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="toolbar">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome, caso ou dados..." />

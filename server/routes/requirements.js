@@ -1,4 +1,5 @@
 const express = require('express');
+const { validateTaskOwnership, mergeUpdate } = require('../helpers');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -48,38 +49,29 @@ module.exports = (db) => {
   router.post('/', (req, res) => {
     const { project_id, task_id, code, title, description = '', priority = 'Média', status = 'Ativo', module = '', source = 'manual' } = req.body || {};
     if (!task_id || !title) return res.status(400).json({ error: 'Tarefa e título são obrigatórios' });
-    const task = db.resolveTask(task_id);
-    if (!task) return res.status(404).json({ error: 'Tarefa não encontrada' });
-    const projectId = project_id || task.project_id;
-    if (Number(projectId) !== Number(task.project_id)) {
-      return res.status(400).json({ error: 'Tarefa não pertence ao projeto informado' });
-    }
+    const owned = validateTaskOwnership(db, task_id, project_id);
+    if (owned.error) return res.status(owned.status).json({ error: owned.error });
+    const projectId = project_id || owned.task.project_id;
     const c = code || db.nextCode('requirements', 'REQ', projectId);
     const r = db.prepare(
       'INSERT INTO requirements (project_id, task_id, code, title, description, priority, status, module, source) VALUES (?,?,?,?,?,?,?,?,?)'
     ).run(projectId, task_id, c, title, description, priority, status, module, source);
-    res.json({ id: Number(r.lastInsertRowid), code: c });
+    res.status(201).json({ id: Number(r.lastInsertRowid), code: c });
   });
 
   router.put('/:id', (req, res) => {
-    const { code, title, description, priority, status, module, source } = req.body || {};
+    const keys = ['code', 'title', 'description', 'priority', 'status', 'module', 'source'];
     const cur = db.prepare('SELECT * FROM requirements WHERE id = ?').get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Requisito não encontrado' });
+    const m = mergeUpdate(cur, req.body || {}, keys);
     db.prepare("UPDATE requirements SET code=?, title=?, description=?, priority=?, status=?, module=?, source=?, updated_at=datetime('now') WHERE id=?")
-      .run(
-        code !== undefined ? code : cur.code,
-        title !== undefined ? title : cur.title,
-        description !== undefined ? description : cur.description,
-        priority !== undefined ? priority : cur.priority,
-        status !== undefined ? status : cur.status,
-        module !== undefined ? module : cur.module,
-        source !== undefined ? source : cur.source,
-        req.params.id
-      );
+      .run(m.code, m.title, m.description, m.priority, m.status, m.module, m.source, req.params.id);
     res.json({ ok: true });
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id FROM requirements WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Requisito não encontrado' });
     db.prepare('DELETE FROM requirements WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });
@@ -87,18 +79,24 @@ module.exports = (db) => {
   router.post('/:id/business-rules', (req, res) => {
     const { rule, category = 'Regra de Negócio', source = 'manual' } = req.body || {};
     if (!rule) return res.status(400).json({ error: 'Regra é obrigatória' });
+    const reqRow = db.prepare('SELECT id FROM requirements WHERE id=?').get(req.params.id);
+    if (!reqRow) return res.status(404).json({ error: 'Requisito não encontrado' });
     const r = db.prepare('INSERT INTO business_rules (requirement_id, rule, category, source) VALUES (?,?,?,?)')
       .run(req.params.id, rule, category, source);
-    res.json({ id: Number(r.lastInsertRowid) });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
 
   router.put('/business-rules/:rid', (req, res) => {
     const { rule, category } = req.body || {};
+    const row = db.prepare('SELECT id FROM business_rules WHERE id=?').get(req.params.rid);
+    if (!row) return res.status(404).json({ error: 'Regra não encontrada' });
     db.prepare('UPDATE business_rules SET rule=?, category=? WHERE id=?').run(rule, category, req.params.rid);
     res.json({ ok: true });
   });
 
   router.delete('/business-rules/:rid', (req, res) => {
+    const row = db.prepare('SELECT id FROM business_rules WHERE id=?').get(req.params.rid);
+    if (!row) return res.status(404).json({ error: 'Regra não encontrada' });
     db.prepare('DELETE FROM business_rules WHERE id=?').run(req.params.rid);
     res.json({ ok: true });
   });

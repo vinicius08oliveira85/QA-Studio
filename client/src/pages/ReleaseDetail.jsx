@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Loading, Select } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Loading, Select, useAction } from '../components/ui.jsx';
 import { RELEASE_STATUS, toneFor } from '../utils.js';
 
 export default function ReleaseDetail() {
@@ -11,6 +11,7 @@ export default function ReleaseDetail() {
   const { current } = useApp();
   const [rel, setRel] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, run] = useAction();
 
   const load = React.useCallback(async () => {
     const d = await api.get('/releases/' + id);
@@ -20,20 +21,26 @@ export default function ReleaseDetail() {
   React.useEffect(() => { load(); }, [load]);
 
   const setStatus = async (status) => {
-    await api.put('/releases/' + id, { ...rel, status });
-    load();
+    await run(async () => {
+      await api.put('/releases/' + id, { ...rel, status });
+      load();
+    });
   };
 
   const addReq = async (rid) => {
     if (!rid) return;
-    await api.post(`/releases/${id}/requirements`, { requirement_id: rid });
-    load();
+    await run(async () => {
+      await api.post(`/releases/${id}/requirements`, { requirement_id: rid });
+      load();
+    });
   };
 
   const removeReq = async (rid) => {
     if (!window.confirm('Remover este requisito da release?')) return;
-    await api.del(`/releases/${id}/requirements/${rid}`);
-    load();
+    await run(async () => {
+      await api.del(`/releases/${id}/requirements/${rid}`);
+      load();
+    });
   };
 
   if (loading) return <Loading />;
@@ -55,6 +62,7 @@ export default function ReleaseDetail() {
         }
       />
       {rel.notes && <div className="muted small mb" style={{ marginTop: -8 }}>{rel.notes}</div>}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel">
         <div className="inline-stats">

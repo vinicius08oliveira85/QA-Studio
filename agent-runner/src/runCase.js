@@ -1,8 +1,7 @@
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const api = require('./studioApi');
-const { aggregateResult } = require('./utils');
+const { aggregateResult, spawnCmd } = require('./utils');
 const { generateSpec, generateApiCollection, judge, getAdapter } = require('./agents');
 const { runPostmanCollection } = require('./postmanRunner');
 
@@ -33,7 +32,7 @@ function collectScreenshots(root, caseId) {
 
 function runPlaywright(root, specPath, { headed } = {}) {
   return new Promise((resolve) => {
-    // Quote relative paths so spaces in the repo folder (e.g. "Novo QA") do not break the CLI.
+    // Pass relative path as an argument so spaces in the repo folder (e.g. "Novo QA") do not break the CLI.
     const relSpec = path.relative(root, specPath).replace(/\\/g, '/');
     const env = { ...process.env };
     if (headed) {
@@ -43,19 +42,27 @@ function runPlaywright(root, specPath, { headed } = {}) {
       env.HEADED = '0';
       env.HEADLESS = '1';
     }
-    const cmd = `npx playwright test "${relSpec}" --config "playwright.config.js"`;
 
-    const child = spawn(cmd, {
+    const child = spawnCmd('npx', ['playwright', 'test', relSpec, '--config', 'playwright.config.js'], {
       cwd: root,
-      env,
-      shell: true,
-      windowsHide: true
+      env
     });
     let log = '';
+    let settled = false;
+    const finish = (result) => { if (!settled) { settled = true; resolve(result); } };
+
+    const timeoutMs = Number(process.env.PLAYWRIGHT_TIMEOUT_MS) || 15 * 60 * 1000;
+    const timer = setTimeout(() => {
+      log += '\n[agent-runner] Playwright excedeu o tempo limite e foi encerrado.\n';
+      try { child.kill('SIGKILL'); } catch { /* já encerrado */ }
+      finish({ exitCode: 1, log });
+    }, timeoutMs);
+    timer.unref?.();
+
     child.stdout.on('data', (d) => { const t = d.toString(); log += t; process.stdout.write(t); });
     child.stderr.on('data', (d) => { const t = d.toString(); log += t; process.stderr.write(t); });
-    child.on('error', (err) => resolve({ exitCode: 1, log: String(err.message) }));
-    child.on('close', (code) => resolve({ exitCode: code ?? 1, log }));
+    child.on('error', (err) => { clearTimeout(timer); finish({ exitCode: 1, log: String(err.message) }); });
+    child.on('close', (code) => { clearTimeout(timer); finish({ exitCode: code ?? 1, log }); });
   });
 }
 

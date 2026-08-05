@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import { BUG_STATUS, toneFor } from '../utils.js';
 
 export default function Retests() {
@@ -12,6 +12,7 @@ export default function Retests() {
   const [filter, setFilter] = useState({ bugStatus: '', result: '', bugId: '' });
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ bug_id: '', execution_id: '', result: 'Passou', notes: '', retest_date: '' });
+  const [error, run] = useAction();
 
   const load = async () => {
     const [b, r] = await Promise.all([
@@ -42,15 +43,19 @@ export default function Retests() {
 
   const save = async () => {
     if (!form.bug_id) return;
-    await api.post(`/bugs/${form.bug_id}/retests`, form);
-    setCreating(false);
-    load();
+    await run(async () => {
+      await api.post(`/bugs/${form.bug_id}/retests`, form);
+      setCreating(false);
+      load();
+    });
   };
 
   const del = async (rt) => {
     if (!window.confirm('Excluir este reteste?')) return;
-    await api.del(`/bugs/retests/${rt.id}`);
-    load();
+    await run(async () => {
+      await api.del(`/bugs/retests/${rt.id}`);
+      load();
+    });
   };
 
   return (
@@ -59,6 +64,7 @@ export default function Retests() {
         title="Reteste"
         actions={<Btn onClick={openCreate} disabled={bugs.length === 0}>Registrar reteste</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel mb">
         <div className="grid3">

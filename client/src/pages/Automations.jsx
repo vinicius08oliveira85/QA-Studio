@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
 import { AUTOMATION_STATUS, toneFor } from '../utils.js';
 
 export default function Automations() {
@@ -15,6 +15,7 @@ export default function Automations() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ test_case_id: '', title: '', description: '', tool: '', frequency: '', owner: '', status: 'Sugerido' });
+  const [error, setError] = useState('');
 
   const openCreate = () => { setForm({ test_case_id: '', title: '', description: '', tool: 'Playwright', frequency: 'A cada release', owner: '', status: 'Sugerido' }); setCreating(true); };
   const openEdit = (a) => setForm({ test_case_id: a.test_case_id || '', title: a.title, description: a.description, tool: a.tool, frequency: a.frequency, owner: a.owner, status: a.status });
@@ -22,21 +23,28 @@ export default function Automations() {
 
   const save = async () => {
     if (!form.title.trim()) return;
-    if (editing) await api.put('/automations/' + editing.id, form);
-    else await api.post('/automations', { ...form, project_id: current.id });
-    refresh(); refreshSug();
-    setCreating(false); setEditing(null);
+    try {
+      if (editing) await api.put('/automations/' + editing.id, form);
+      else await api.post('/automations', { ...form, project_id: current.id });
+      refresh(); refreshSug();
+      setError('');
+      setCreating(false); setEditing(null);
+    } catch (e) { setError(e.message || 'Falha ao salvar automação.'); }
   };
 
   const remove = async (a) => {
     if (!window.confirm('Excluir esta automação?')) return;
-    await api.del('/automations/' + a.id);
-    refresh(); refreshSug();
+    try {
+      await api.del('/automations/' + a.id);
+      refresh(); refreshSug();
+    } catch (e) { setError(e.message || 'Falha ao excluir automação.'); }
   };
 
   const setStatus = async (a, status) => {
-    await api.put('/automations/' + a.id, { ...a, status });
-    refresh();
+    try {
+      await api.put('/automations/' + a.id, { ...a, status });
+      refresh();
+    } catch (e) { setError(e.message || 'Falha ao atualizar status.'); }
   };
 
   return (
@@ -45,6 +53,7 @@ export default function Automations() {
         title="Automação"
         actions={<Btn onClick={openCreate}>Nova automação</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel">
         <h2>Candidatos à automação</h2>

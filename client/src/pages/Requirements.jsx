@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { PRIORITIES, REQUIREMENT_STATUS, toneFor } from '../utils.js';
 
@@ -24,6 +24,7 @@ export default function Requirements() {
   const [newRule, setNewRule] = useState('');
   const [editingRule, setEditingRule] = useState(null);
   const [ruleText, setRuleText] = useState('');
+  const [error, run] = useAction();
 
   const loadDetail = async (id) => {
     const d = await api.get('/requirements/' + id);
@@ -44,35 +45,45 @@ export default function Requirements() {
 
   const save = async () => {
     if (!form.title.trim()) return;
-    if (editing) await api.put('/requirements/' + editing.id, form);
-    else await api.post('/requirements', { ...form, project_id: current.id, task_id: taskId });
-    refresh();
-    setCreating(false); setEditing(null);
+    await run(async () => {
+      if (editing) await api.put('/requirements/' + editing.id, form);
+      else await api.post('/requirements', { ...form, project_id: current.id, task_id: taskId });
+      refresh();
+      setCreating(false); setEditing(null);
+    });
   };
 
   const remove = async (r) => {
     if (!window.confirm(`Excluir o requisito ${r.code}?`)) return;
-    await api.del('/requirements/' + r.id);
-    refresh();
+    await run(async () => {
+      await api.del('/requirements/' + r.id);
+      refresh();
+    });
   };
 
   const addRule = async () => {
     if (!newRule.trim()) return;
-    await api.post(`/requirements/${detail.id}/business-rules`, { rule: newRule.trim() });
-    setNewRule('');
-    loadDetail(detail.id);
+    await run(async () => {
+      await api.post(`/requirements/${detail.id}/business-rules`, { rule: newRule.trim() });
+      setNewRule('');
+      loadDetail(detail.id);
+    });
   };
 
   const saveRule = async () => {
-    await api.put(`/requirements/business-rules/${editingRule.id}`, { rule: ruleText, category: editingRule.category });
-    setEditingRule(null);
-    loadDetail(detail.id);
+    await run(async () => {
+      await api.put(`/requirements/business-rules/${editingRule.id}`, { rule: ruleText, category: editingRule.category });
+      setEditingRule(null);
+      loadDetail(detail.id);
+    });
   };
 
   const delRule = async (rid) => {
     if (!window.confirm('Excluir esta regra de negócio?')) return;
-    await api.del(`/requirements/business-rules/${rid}`);
-    loadDetail(detail.id);
+    await run(async () => {
+      await api.del(`/requirements/business-rules/${rid}`);
+      loadDetail(detail.id);
+    });
   };
 
   return (
@@ -85,6 +96,7 @@ export default function Requirements() {
           <Btn onClick={openCreate}>Novo requisito</Btn>
         </>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel mb">
         <div className="grid3">

@@ -1,3 +1,5 @@
+const { spawn } = require('child_process');
+
 function extractJson(text) {
   if (!text) return null;
   let t = String(text).trim();
@@ -52,6 +54,24 @@ function parseArgs(argv) {
   return out;
 }
 
+function winQuote(arg) {
+  const s = String(arg).replace(/"/g, '""');
+  return /[\s"&^|<>()%@!]/.test(s) ? `"${s}"` : s;
+}
+
+/**
+ * Spawn a command cross-platform without `shell: true`.
+ * On Windows .cmd shims (npx, opencode) need cmd.exe; args are passed as a
+ * single quoted line so spaces in paths (e.g. "Novo QA") stay safe.
+ */
+function spawnCmd(cmd, args = [], opts = {}) {
+  if (process.platform === 'win32') {
+    const line = [cmd, ...args].map(winQuote).join(' ');
+    return spawn(process.env.ComSpec, ['/d', '/s', '/c', line], Object.assign({ windowsHide: true }, opts));
+  }
+  return spawn(cmd, args, Object.assign({ windowsHide: true }, opts));
+}
+
 function aggregateResult(stepResults) {
   const results = (stepResults || []).map((s) => s.result);
   if (results.some((r) => r === 'Falhou')) return 'Falhou';
@@ -65,5 +85,6 @@ module.exports = {
   extractJson,
   extractCodeFence,
   parseArgs,
-  aggregateResult
+  aggregateResult,
+  spawnCmd
 };

@@ -43,6 +43,10 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
   const [copied, setCopied] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const timers = React.useRef([]);
+
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   useEffect(() => {
     if (!open) return;
@@ -55,6 +59,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
     setSuccess('');
     setCopied('');
     setSelReq([]);
+    setConfirmReplace(false);
     if (!taskId) {
       setError('Abra uma tarefa primeiro para gerar conteúdo com IA.');
       setExisting({});
@@ -127,6 +132,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
   const generate = async () => {
     if (!taskId) { setError('Abra uma tarefa primeiro para gerar conteúdo com IA.'); return; }
     setError(''); setSuccess('');
+    setConfirmReplace(false);
     setLoading(true);
     try {
       const r = await api.post('/ai/generate', { prompt });
@@ -142,10 +148,11 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
   const apply = async () => {
     if (!taskId) { setError('Abra uma tarefa primeiro para aplicar o conteúdo.'); return; }
     if (!parsed) { setError('Resposta da IA inválida: não contém JSON estruturado.'); return; }
-    if (replacesSection) {
-      const ok = window.confirm('Isso substituirá o conteúdo desta seção na tarefa. Continuar?');
-      if (!ok) return;
+    if (replacesSection && !confirmReplace) {
+      setConfirmReplace(true);
+      return;
     }
+    setConfirmReplace(false);
     setError(''); setApplying(true);
     try {
       const summary = await applyResult(parsed, {
@@ -247,7 +254,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
         <Btn onClick={generate} disabled={!canGenerate || loading}>
           {loading ? 'Gerando...' : 'Gerar com IA'}
         </Btn>
-        <Btn className="ghost" onClick={async () => { if (await copyText(prompt)) { setCopied('prompt'); setTimeout(() => setCopied(''), 1800); } }}>
+        <Btn className="ghost" onClick={async () => { if (await copyText(prompt)) { setCopied('prompt'); timers.current.push(setTimeout(() => setCopied(''), 1800)); } }}>
           {copied === 'prompt' ? 'Prompt copiado!' : 'Copiar prompt'}
         </Btn>
         <Btn className="gray" onClick={() => navigate('/configuracoes')}>Configurar chave</Btn>
@@ -275,8 +282,16 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
             {preview.mass > 0 && <div className="stat-chip"><div className="v">{preview.mass}</div><div className="k">Massas</div></div>}
           </div>
           <div className="row-actions mt">
-            <Btn onClick={apply} disabled={applying}>{applying ? 'Aplicando...' : 'Aplicar'}</Btn>
-            <Btn className="ghost" onClick={async () => { if (await copyText(responseText)) { setCopied('resposta'); setTimeout(() => setCopied(''), 1800); } }}>
+            {confirmReplace && replacesSection ? (
+              <>
+                <span className="small" style={{ alignSelf: 'center' }}>Isso substituirá o conteúdo desta seção na tarefa.</span>
+                <Btn className="danger" onClick={apply} disabled={applying}>{applying ? 'Aplicando...' : 'Sim, substituir'}</Btn>
+                <Btn className="gray" onClick={() => setConfirmReplace(false)}>Cancelar</Btn>
+              </>
+            ) : (
+              <Btn onClick={apply} disabled={applying}>{applying ? 'Aplicando...' : 'Aplicar'}</Btn>
+            )}
+            <Btn className="ghost" onClick={async () => { if (await copyText(responseText)) { setCopied('resposta'); timers.current.push(setTimeout(() => setCopied(''), 1800)); } }}>
               {copied === 'resposta' ? 'Resposta copiada!' : 'Copiar resposta'}
             </Btn>
           </div>

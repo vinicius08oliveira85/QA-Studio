@@ -1,4 +1,5 @@
 const express = require('express');
+const { mergeUpdate } = require('../helpers');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -51,21 +52,14 @@ module.exports = (db) => {
   });
 
   router.put('/:id', (req, res) => {
-    const { code, title, description, status, priority, assignee } = req.body || {};
+    const keys = ['code', 'title', 'description', 'status', 'priority', 'assignee'];
     const cur = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const m = mergeUpdate(cur, req.body || {}, keys);
     db.prepare(
       `UPDATE tasks SET code=?, title=?, description=?, status=?, priority=?, assignee=?,
         updated_at=datetime('now') WHERE id=?`
-    ).run(
-      code !== undefined ? code : cur.code,
-      title !== undefined ? title : cur.title,
-      description !== undefined ? description : cur.description,
-      status !== undefined ? status : cur.status,
-      priority !== undefined ? priority : cur.priority,
-      assignee !== undefined ? assignee : cur.assignee,
-      req.params.id
-    );
+    ).run(m.code, m.title, m.description, m.status, m.priority, m.assignee, req.params.id);
     res.json({ ok: true });
   });
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
 import { api } from '../api.js';
-import { Btn, Empty, Field, Header, Input, Modal, Textarea, useList } from '../components/ui.jsx';
+import { Btn, Empty, ErrorBanner, Field, Header, Input, Modal, Textarea, useList } from '../components/ui.jsx';
 
 export default function Projects() {
   const { projects, current, setProjectId, refreshProjects } = useApp();
@@ -10,24 +10,30 @@ export default function Projects() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', description: '', system: '' });
+  const [error, setError] = useState('');
 
   const openCreate = () => { setForm({ name: '', description: '', system: '' }); setCreating(true); };
   const openEdit = (p) => { setForm({ name: p.name, description: p.description, system: p.system }); setEditing(p); };
 
   const save = async () => {
     if (!form.name.trim()) return;
-    if (editing) await api.put('/projects/' + editing.id, { ...form, status: editing.status });
-    else await api.post('/projects', form);
-    await refreshProjects();
-    refresh();
-    setCreating(false); setEditing(null);
+    try {
+      if (editing) await api.put('/projects/' + editing.id, { ...form, status: editing.status });
+      else await api.post('/projects', form);
+      await refreshProjects();
+      refresh();
+      setError('');
+      setCreating(false); setEditing(null);
+    } catch (e) { setError(e.message || 'Falha ao salvar projeto.'); }
   };
 
   const remove = async (p) => {
     if (!window.confirm(`Excluir o projeto "${p.name}" e todos os dados vinculados?`)) return;
-    await api.del('/projects/' + p.id);
-    await refreshProjects();
-    refresh();
+    try {
+      await api.del('/projects/' + p.id);
+      await refreshProjects();
+      refresh();
+    } catch (e) { setError(e.message || 'Falha ao excluir projeto.'); }
   };
 
   return (
@@ -36,6 +42,7 @@ export default function Projects() {
         title="Projetos"
         actions={<Btn onClick={openCreate}>Novo projeto</Btn>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {items.length === 0 && (
         <Empty>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, Header, Loading, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Header, Loading, useList } from '../components/ui.jsx';
 import { toneFor } from '../utils.js';
 import AiModal from '../components/AiModal.jsx';
 
@@ -32,12 +32,25 @@ function DashboardBody({ isTask, taskId, current, currentTask }) {
     ? '/dashboard?taskId=' + taskId
     : '/dashboard?projectId=' + current.id;
 
-  const { items: d, loading, refresh } = useList(React.useCallback(
+  const { items: d, loading, error, refresh } = useList(React.useCallback(
     () => api.get(query),
     [query]
   ));
 
-  if (loading || !d) return <Loading />;
+  if (loading) return <Loading />;
+
+  if (!d || typeof d !== 'object' || !Array.isArray(d.recentExecutions)) {
+    return (
+      <div>
+        <Header
+          title="Dashboard"
+          actions={isTask ? <Btn className="ghost" onClick={() => setAiOpen(true)}>IA (completo)</Btn> : null}
+        />
+        {error && <ErrorBanner>{error}</ErrorBanner>}
+        <Empty>Não foi possível carregar o dashboard.</Empty>
+      </div>
+    );
+  }
 
   const severityLegend = { Blocker: 'red', Alta: 'red', Média: 'amber', Baixa: 'gray' };
   const typeColors = { 'Funcional': 'blue', 'API': 'green', 'Fumaça': 'amber', 'Regressão': 'gray' };

@@ -44,11 +44,14 @@ function buildVars(collection, baseURL) {
   return vars;
 }
 
-async function runPostmanCollection(collection, { baseURL } = {}) {
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+async function runPostmanCollection(collection, { baseURL, timeoutMs } = {}) {
   const vars = buildVars(collection, baseURL || process.env.TARGET_BASE_URL || '');
   const requests = collectItems(collection.item);
   const results = [];
   let log = '';
+  const perRequestTimeout = timeoutMs || Number(process.env.POSTMAN_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
 
   for (let i = 0; i < requests.length; i++) {
     const item = requests[i];
@@ -75,12 +78,19 @@ async function runPostmanCollection(collection, { baseURL } = {}) {
     let responseText = '';
     let error = null;
     try {
-      const res = await fetch(url, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : body });
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: ['GET', 'HEAD'].includes(method) ? undefined : body,
+        signal: AbortSignal.timeout(perRequestTimeout)
+      });
       status = res.status;
       ok = res.ok;
       responseText = await res.text();
     } catch (err) {
-      error = err.message;
+      error = err.name === 'TimeoutError' || /abort/i.test(err?.message || '')
+        ? `timeout após ${perRequestTimeout}ms`
+        : err.message;
     }
     const durationMs = Date.now() - started;
     const line = `[${i + 1}] ${method} ${url} → ${error || status} (${durationMs}ms)\n`;

@@ -291,6 +291,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
 /* Bug form highlight */
 .highlight { background: #fffbf0; border: 1px solid #f3d9a0; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; }
+.error-banner { background: #fdecec; border-color: #fca5a5; color: #7f1d1d; }
 
 /* Agent live chat */
 .agent-chat { display: flex; flex-direction: column; max-height: 420px; padding: 0; overflow: hidden; }

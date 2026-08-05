@@ -13,11 +13,18 @@ async function prompt(text, opts = {}) {
   }
 
   const modelId = process.env.CURSOR_MODEL || 'composer-2.5';
-  const result = await Agent.prompt(text, {
-    apiKey: process.env.CURSOR_API_KEY,
-    model: { id: modelId },
-    local: { cwd: opts.cwd || process.cwd() }
-  });
+  const timeoutMs = opts.timeoutMs || Number(process.env.AGENT_TIMEOUT_MS) || 600_000;
+
+  const result = await Promise.race([
+    Agent.prompt(text, {
+      apiKey: process.env.CURSOR_API_KEY,
+      model: { id: modelId },
+      local: { cwd: opts.cwd || process.cwd() }
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Cursor prompt timeout after ${timeoutMs}ms`)), timeoutMs)
+    )
+  ]);
 
   if (result?.result) return String(result.result);
   if (typeof result === 'string') return result;

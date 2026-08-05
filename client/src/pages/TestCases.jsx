@@ -2,7 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { CASE_STATUS, CASE_TYPES, EXECUTION_MODES, PRIORITIES, toneFor } from '../utils.js';
 
@@ -34,6 +34,7 @@ export default function TestCases() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(blank);
   const [detail, setDetail] = useState(null);
+  const [error, run] = useAction();
 
   React.useEffect(() => {
     if (!taskId) return;
@@ -75,17 +76,21 @@ export default function TestCases() {
     if (!form.title.trim()) return;
     const steps = form.steps.filter((s) => s.action.trim()).map((s, i) => ({ order: i + 1, action: s.action, expected: s.expected }));
     const body = { ...form, steps };
-    if (editing) await api.put('/test-cases/' + editing.id, body);
-    else await api.post('/test-cases', { ...body, project_id: current.id, task_id: taskId });
-    refresh();
-    setCreating(false); setEditing(null);
+    await run(async () => {
+      if (editing) await api.put('/test-cases/' + editing.id, body);
+      else await api.post('/test-cases', { ...body, project_id: current.id, task_id: taskId });
+      refresh();
+      setCreating(false); setEditing(null);
+    });
   };
 
   const remove = async (tc) => {
     if (!window.confirm(`Excluir o caso ${tc.code} - ${tc.title}?`)) return;
-    await api.del('/test-cases/' + tc.id);
-    refresh();
-    if (detail && detail.id === tc.id) setDetail(null);
+    await run(async () => {
+      await api.del('/test-cases/' + tc.id);
+      refresh();
+      if (detail && detail.id === tc.id) setDetail(null);
+    });
   };
 
   const loadDetail = async (id) => {
@@ -95,14 +100,18 @@ export default function TestCases() {
 
   const toggleFlag = async (tc, key) => {
     const full = await api.get('/test-cases/' + tc.id);
-    await api.put('/test-cases/' + tc.id, { ...full, [key]: full[key] ? 0 : 1 });
-    refresh();
-    if (detail?.id === tc.id) loadDetail(tc.id);
+    await run(async () => {
+      await api.put('/test-cases/' + tc.id, { ...full, [key]: full[key] ? 0 : 1 });
+      refresh();
+      if (detail?.id === tc.id) loadDetail(tc.id);
+    });
   };
 
   const duplicate = async (tc) => {
-    await api.post(`/test-cases/${tc.id}/duplicate`);
-    refresh();
+    await run(async () => {
+      await api.post(`/test-cases/${tc.id}/duplicate`);
+      refresh();
+    });
   };
 
   const addMass = async () => {
@@ -112,14 +121,18 @@ export default function TestCases() {
     if (!name) return;
     const data = window.prompt('Conteúdo da massa (dados):', '') || '';
     const purpose = window.prompt('Objetivo da massa:', '') || '';
-    await api.post(`/test-cases/${detail.id}/test-mass`, { name, data, purpose });
-    loadDetail(detail.id);
+    await run(async () => {
+      await api.post(`/test-cases/${detail.id}/test-mass`, { name, data, purpose });
+      loadDetail(detail.id);
+    });
   };
 
   const delMass = async (m) => {
     if (!window.confirm('Excluir esta massa?')) return;
-    await api.del(`/test-cases/test-mass/${m.id}`);
-    loadDetail(detail.id);
+    await run(async () => {
+      await api.del(`/test-cases/test-mass/${m.id}`);
+      loadDetail(detail.id);
+    });
   };
 
   return (
@@ -131,6 +144,7 @@ export default function TestCases() {
           <Btn onClick={openCreate}>Novo caso de teste</Btn>
         </>}
       />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="panel mb">
         <div className="grid3">

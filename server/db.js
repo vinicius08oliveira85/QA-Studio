@@ -5,7 +5,13 @@ const path = require('node:path');
 const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new DatabaseSync(path.join(dataDir, 'qa.db'));
+const dbPath = process.env.QA_DB_PATH || path.join(dataDir, 'qa.db');
+if (process.env.QA_DB_PATH) {
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
@@ -86,10 +92,25 @@ db.exec(`
 
 db.nextCode = (table, prefix, projectId) => {
   const row = projectId
-    ? db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE project_id = ?`).get(projectId)
-    : db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get();
-  const n = Number(row?.c || 0) + 1;
+    ? db.prepare(`SELECT code FROM ${table} WHERE project_id = ? AND code LIKE ? ORDER BY code DESC LIMIT 1`).get(projectId, `${prefix}-%`)
+    : db.prepare(`SELECT code FROM ${table} WHERE code LIKE ? ORDER BY code DESC LIMIT 1`).get(`${prefix}-%`);
+  const last = row ? row.code : '';
+  const m = last.match(/(\d+)\s*$/);
+  const n = (m ? parseInt(m[1], 10) : 0) + 1;
   return `${prefix}-${String(n).padStart(3, '0')}`;
+};
+
+/** Executa fn dentro de uma transação; faz rollback em caso de erro. */
+db.tx = (fn) => {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 };
 
 /** Resolve project_id a partir de task_id; lança se inválido. */

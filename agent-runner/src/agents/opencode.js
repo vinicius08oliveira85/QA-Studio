@@ -1,48 +1,7 @@
-const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-
-function runOpencode(prompt, { cwd, timeoutMs = 600_000 } = {}) {
-  const bin = process.env.OPENCODE_BIN || 'opencode';
-  const args = ['run', prompt];
-  if (process.env.OPENCODE_MODEL) {
-    args.push('--model', process.env.OPENCODE_MODEL);
-  }
-  if (process.env.OPENCODE_AUTO !== '0') {
-    args.push('--auto');
-  }
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, {
-      cwd: cwd || process.cwd(),
-      env: process.env,
-      shell: true,
-      windowsHide: true
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`OpenCode timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`OpenCode failed to start (${bin}): ${err.message}`));
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0 && !stdout.trim()) {
-        reject(new Error(`OpenCode exited ${code}: ${stderr || stdout}`));
-        return;
-      }
-      resolve({ stdout, stderr, code });
-    });
-  });
-}
+const { spawnCmd } = require('../utils');
 
 /** Prefer writing prompt to temp file + stdin to avoid Windows arg length limits. */
 async function prompt(text, opts = {}) {
@@ -55,18 +14,17 @@ async function prompt(text, opts = {}) {
     if (process.env.OPENCODE_AUTO !== '0') args.push('--auto');
 
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(bin, args, {
+      const child = spawnCmd(bin, args, {
         cwd: opts.cwd || process.cwd(),
-        env: process.env,
-        shell: true,
-        windowsHide: true
+        env: process.env
       });
       let stdout = '';
       let stderr = '';
+      const timeoutMs = opts.timeoutMs || Number(process.env.AGENT_TIMEOUT_MS) || 600_000;
       const timer = setTimeout(() => {
         child.kill('SIGTERM');
-        reject(new Error(`OpenCode timeout after ${opts.timeoutMs || 600_000}ms`));
-      }, opts.timeoutMs || 600_000);
+        reject(new Error(`OpenCode timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       child.stdout.on('data', (d) => { stdout += d.toString(); });
       child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -90,4 +48,4 @@ async function prompt(text, opts = {}) {
   }
 }
 
-module.exports = { name: 'opencode', prompt, runOpencode };
+module.exports = { name: 'opencode', prompt };

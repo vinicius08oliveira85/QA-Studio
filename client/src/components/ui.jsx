@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 
 export function Field({ label, required, children, className = '' }) {
   return (
@@ -29,20 +29,53 @@ export function Badge({ children, tone }) {
   return <span className={`badge ${tone || 'gray'}`}>{children}</span>;
 }
 
+export function ErrorBanner({ children }) {
+  if (!children) return null;
+  return (
+    <div className="highlight error-banner" role="alert">
+      <strong>Erro:</strong> {children}
+    </div>
+  );
+}
+
 export function Modal({ open, onClose, title, children, footer, width = 620 }) {
+  const ref = useRef(null);
+  const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2, 8)}`);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const prevFocus = document.activeElement;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === 'Tab' && ref.current) {
+        const focusables = ref.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const t = setTimeout(() => {
+      const f = ref.current?.querySelector('input, select, textarea, button');
+      if (f) f.focus();
+    }, 0);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      clearTimeout(t);
+      if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" style={{ maxWidth: width }}>
+      <div className="modal" style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-labelledby={titleId.current} ref={ref}>
         <div className="modal-head">
-          <h3>{title}</h3>
+          <h3 id={titleId.current}>{title}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Fechar">&times;</button>
         </div>
         <div className="modal-body">{children}</div>
@@ -75,15 +108,37 @@ export function Confirm({ onConfirm, message = 'Excluir este registro?' }) {
 export function useList(load) {
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
   const [reload, setReload] = React.useState(0);
   const refresh = React.useCallback(() => setReload((n) => n + 1), []);
 
   React.useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    load().then(setItems).catch(() => {}).finally(() => setLoading(false));
+    setError('');
+    load().then((data) => { if (!cancelled) setItems(data); })
+      .catch((e) => { if (!cancelled) setError(e?.message || 'Falha ao carregar dados.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [load, reload]);
 
-  return { items, setItems, loading, refresh, reload };
+  return { items, setItems, loading, error, refresh, reload };
+}
+
+/** Executa uma mutação async com estado de erro. Retorna [error, run]. */
+export function useAction() {
+  const [error, setError] = React.useState('');
+  const run = React.useCallback(async (fn) => {
+    try {
+      setError('');
+      await fn();
+      return true;
+    } catch (e) {
+      setError(e?.message || 'Falha na operação.');
+      return false;
+    }
+  }, []);
+  return [error, run, setError];
 }
 
 export function Loading() {
