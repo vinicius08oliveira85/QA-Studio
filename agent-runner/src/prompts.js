@@ -45,13 +45,16 @@ ${fixHint}
 `;
 }
 
-function buildApiCollectionPrompt(ctx) {
+function buildApiCollectionPrompt(ctx, opts = {}) {
   const steps = (ctx.steps || [])
     .map((s) => `${s.order}. ACTION: ${s.action}\n   EXPECTED: ${s.expected}`)
     .join('\n');
   const mass = (ctx.mass || [])
     .map((m) => `- ${m.name}: ${m.data}${m.purpose ? ` (${m.purpose})` : ''}`)
     .join('\n') || '(nenhuma)';
+  const fixHint = opts.fixHint
+    ? `\n=== FIX REQUEST (a versão anterior era inválida) ===\n${opts.fixHint.slice(0, 2000)}\nCorrija a coleção e reenvie o JSON completo.\n`
+    : '';
 
   return `You are an API QA engineer. Generate a Postman Collection v2.1 JSON for an EXTERNAL API.
 
@@ -65,17 +68,18 @@ ${steps || '(no steps)'}
 
 === TEST DATA (mass) ===
 ${mass}
-
+${fixHint}
 === OUTPUT RULES ===
 1. Reply with ONE json code fence only. No prose outside the fence.
 2. Valid Postman Collection v2.1 with info.name = "${ctx.code}", variable baseUrl = "${ctx.baseURL}".
 3. Each step becomes an item with request (method, header, url.raw using {{baseUrl}}/..., optional body.mode=raw).
-4. Infer method/path/body from ACTION text; assert expectations via realistic status codes in item descriptions.
-5. Do not invent auth tokens unless preconditions/mass provide them; use Authorization header only when data exists.
+4. Every item MUST have a request with a valid "method" and a non-empty "url.raw" (or url.host). No request may be missing these.
+5. Infer method/path/body from ACTION text; assert expectations via realistic status codes in item descriptions.
+6. Do not invent auth tokens unless preconditions/mass provide them; use Authorization header only when data exists.
 `;
 }
 
-function buildJudgePrompt(ctx, runOut) {
+function buildJudgePrompt(ctx, runOut, opts = {}) {
   const steps = (ctx.steps || [])
     .map((s) => `${s.order}. expected: ${s.expected} | action: ${s.action}`)
     .join('\n');
@@ -85,6 +89,9 @@ function buildJudgePrompt(ctx, runOut) {
     : '';
   const apiExtra = runOut.requestResults
     ? `\n=== API REQUEST RESULTS ===\n${JSON.stringify(runOut.requestResults, null, 2).slice(0, 8000)}\n`
+    : '';
+  const fixHint = opts.fixHint
+    ? `\n=== FIX REQUEST (a resposta anterior foi inválida) ===\n${opts.fixHint.slice(0, 1500)}\n`
     : '';
 
   return `You are a QA lead judging an automated run against expected step outcomes.
@@ -103,6 +110,7 @@ ${pwErrors}
 === SCREENSHOT PATHS ===
 ${shots}
 ${apiExtra}
+${fixHint}
 === OUTPUT ===
 Respond with ONLY valid JSON (no markdown fence required, but allowed):
 {

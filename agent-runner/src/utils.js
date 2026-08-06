@@ -1,4 +1,67 @@
 const { spawn } = require('child_process');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+function sha256(text) {
+  return crypto.createHash('sha256').update(String(text)).digest('hex');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Cópia recursiva manual de diretório.
+ * `fs.cpSync` (recursive) pode derrubar o Node 24 no Windows quando o caminho
+ * contém caracteres não-ASCII (ex.: "Repositórios") — ver bundleEvidence.
+ */
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(s, d);
+    } else if (entry.isSymbolicLink()) {
+      try { fs.symlinkSync(fs.readlinkSync(s), d); } catch { /* ignore */ }
+    } else {
+      fs.copyFileSync(s, d);
+    }
+  }
+}
+
+/**
+ * Remoção recursiva manual de diretório.
+ * `fs.rmSync` (recursive) falha silenciosamente no Windows com caminhos
+ * não-ASCII (deixa arquivos para trás) — mesmo bug do cpSync.
+ */
+function removeDirSync(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) removeDirSync(p);
+    else fs.unlinkSync(p);
+  }
+  fs.rmdirSync(dir);
+}
+
+function listRuns(root) {
+  const dir = path.join(root, 'artifacts', 'runs');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((n) => n.startsWith('run-'))
+    .sort()
+    .reverse();
+}
+
+/** Mantém apenas os N bundles de evidência mais recentes (EVIDENCE_RUNS). */
+function pruneRuns(root, keep = Number(process.env.EVIDENCE_RUNS || 20)) {
+  const dir = path.join(root, 'artifacts', 'runs');
+  for (const name of listRuns(root).slice(keep)) {
+    try { removeDirSync(path.join(dir, name)); } catch { /* ignore */ }
+  }
+}
 
 function extractJson(text) {
   if (!text) return null;
@@ -116,5 +179,11 @@ module.exports = {
   aggregateResult,
   spawnCmd,
   treeKill,
-  checkUrl
+  checkUrl,
+  sha256,
+  sleep,
+  copyDirSync,
+  removeDirSync,
+  listRuns,
+  pruneRuns
 };

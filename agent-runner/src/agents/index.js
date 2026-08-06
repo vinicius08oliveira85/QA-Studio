@@ -18,7 +18,7 @@ function getAdapter(name) {
   return { key, adapter };
 }
 
-async function generateSpec(ctx, { agentName, cwd, fixHint } = {}) {
+async function generateSpec(ctx, { agentName, cwd, fixHint, specPath } = {}) {
   const { key, adapter } = getAdapter(agentName);
   const prompt = buildGeneratePrompt(ctx, { fixHint });
   const raw = await adapter.prompt(prompt, { cwd });
@@ -29,16 +29,16 @@ async function generateSpec(ctx, { agentName, cwd, fixHint } = {}) {
 
   const dir = path.join(cwd, '.generated');
   fs.mkdirSync(dir, { recursive: true });
-  const fileName = `case-${ctx.caseId}.spec.ts`;
-  const specPath = path.join(dir, fileName);
-  fs.writeFileSync(specPath, code.endsWith('\n') ? code : code + '\n', 'utf8');
-  const persistedPath = persistArtifact(cwd, specPath, fileName);
-  return { specPath, persistedPath, agent: key, raw };
+  const fileName = specPath ? path.basename(specPath) : `case-${ctx.caseId}.spec.ts`;
+  const target = specPath || path.join(dir, fileName);
+  fs.writeFileSync(target, code.endsWith('\n') ? code : code + '\n', 'utf8');
+  const persistedPath = persistArtifact(cwd, target, fileName);
+  return { specPath: target, persistedPath, agent: key, raw };
 }
 
-async function generateApiCollection(ctx, { agentName, cwd } = {}) {
+async function generateApiCollection(ctx, { agentName, cwd, fixHint } = {}) {
   const { key, adapter } = getAdapter(agentName);
-  const prompt = buildApiCollectionPrompt(ctx);
+  const prompt = buildApiCollectionPrompt(ctx, { fixHint });
   const raw = await adapter.prompt(prompt, { cwd });
   let collection = extractJson(raw);
   if (!collection?.info || !collection?.item) {
@@ -60,33 +60,54 @@ async function generateApiCollection(ctx, { agentName, cwd } = {}) {
 
 async function judge(ctx, runOut, { agentName, cwd } = {}) {
   const { key, adapter } = getAdapter(agentName);
-  const prompt = buildJudgePrompt(ctx, runOut);
-  const raw = await adapter.prompt(prompt, { cwd });
-  const parsed = extractJson(raw);
-  if (!parsed || !parsed.result) {
-    throw new Error(`Agent (${key}) did not return judgment JSON. Output head: ${String(raw).slice(0, 400)}`);
-  }
 
-  const stepResults = Array.isArray(parsed.step_results) ? parsed.step_results : [];
-  const normalized = stepResults.map((s) => ({
-    order: Number(s.order) || 0,
-    actual: s.actual || '',
-    result: ['Passou', 'Falhou', 'Não Executado', 'Bloqueado', 'Pendente'].includes(s.result)
-      ? s.result
-      : 'Não Executado'
-  }));
+  const parse = (raw) => {
+    const parsed = extractJson(raw);
+    if (!parsed || !parsed.result) return { ok: false, raw };
+    const stepResults = Array.isArray(parsed.step_results) ? parsed.step_results : [];
+    const normalized = stepResults.map((s) => ({
+      order: Number(s.order) || 0,
+      actual: s.actual || '',
+      result: ['Passou', 'Falhou', 'Não Executado', 'Bloqueado', 'Pendente'].includes(s.result)
+        ? s.result
+        : 'Não Executado'
+    }));
+    // Completa ordens ausentes para cada passo esperado (evita veredito sem lastro).
+    const expectedOrders = new Set((ctx.steps || []).map((s) => s.order));
+    for (const order of expectedOrders) {
+      if (!normalized.some((r) => r.order === order)) {
+        normalized.push({ order, actual: '', result: 'Não Executado' });
+      }
+    }
+    normalized.sort((a, b) => a.order - b.order);
 
-  const allowed = ['Passou', 'Falhou', 'Bloqueado', 'Não Executado', 'Pendente'];
-  const result = allowed.includes(parsed.result) ? parsed.result : aggregateResult(normalized);
+    const allowed = ['Passou', 'Falhou', 'Bloqueado', 'Não Executado', 'Pendente'];
+    const result = allowed.includes(parsed.result) ? parsed.result : aggregateResult(normalized);
 
-  return {
-    result,
-    actual_result: parsed.actual_result || '',
-    notes: parsed.notes || '',
-    step_results: normalized,
-    agent: key,
-    raw
+    return {
+      ok: true,
+      value: {
+        result,
+        actual_result: parsed.actual_result || '',
+        notes: parsed.notes || '',
+        step_results: normalized,
+        agent: key,
+        raw
+      }
+    };
   };
+
+  let out = parse(await adapter.prompt(buildJudgePrompt(ctx, runOut), { cwd }));
+  if (!out.ok) {
+    // Retry 1x enviando o erro de parse para o agent corrigir o JSON.
+    const hint = `A resposta anterior não é um JSON válido ou faltou "result". Reenvie apenas o JSON do schema pedido.\nHead da resposta anterior:\n${String(out.raw).slice(0, 1500)}`;
+    console.warn('[agent-runner] Judge: resposta inválida; retentando com hint de parse...');
+    out = parse(await adapter.prompt(buildJudgePrompt(ctx, runOut, { fixHint: hint }), { cwd }));
+  }
+  if (!out.ok) {
+    throw new Error(`Agent (${key}) did not return judgment JSON. Output head: ${String(out.raw).slice(0, 400)}`);
+  }
+  return out.value;
 }
 
 module.exports = { getAdapter, generateSpec, generateApiCollection, judge };

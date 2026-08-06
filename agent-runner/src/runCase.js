@@ -1,13 +1,62 @@
 const path = require('path');
 const fs = require('fs');
 const api = require('./studioApi');
-const { aggregateResult, spawnCmd, treeKill } = require('./utils');
+const { aggregateResult, spawnCmd, treeKill, sha256, copyDirSync, removeDirSync, pruneRuns } = require('./utils');
 const { generateSpec, generateApiCollection, judge, getAdapter } = require('./agents');
 const { runPostmanCollection } = require('./postmanRunner');
+const { statePathFor } = require('../helpers/ssoWait');
 
 const UI_TYPES = new Set(['Fumaça', 'Funcional']);
 const API_TYPES = new Set(['API']);
 const ALLOWED_TYPES = new Set([...UI_TYPES, ...API_TYPES]);
+
+/** Falha de infraestrutura (timeout de agent, crash do Playwright, rede) — candidata a retry, não é veredito. */
+class InfraError extends Error {}
+
+/** Hash estável dos inputs do caso: se passos/massa/precondições mudarem, o spec não é reutilizado. */
+function specCacheKey(ctx) {
+  const payload = {
+    type: ctx.type,
+    baseURL: ctx.baseURL,
+    preconditions: ctx.preconditions,
+    steps: (ctx.steps || []).map((s) => [s.order, s.action, s.expected]),
+    mass: (ctx.mass || []).map((m) => [m.name, m.data || '', m.purpose || ''])
+  };
+  return sha256(JSON.stringify(payload)).slice(0, 12);
+}
+
+function specNameFor(ctx) {
+  return `case-${ctx.caseId}-${specCacheKey(ctx)}.spec.ts`;
+}
+
+/** Remove specs antigos do mesmo caso que ficaram com hash desatualizado. */
+function cleanStaleGenerated(root, ctx) {
+  const dir = path.join(root, '.generated');
+  if (!fs.existsSync(dir)) return;
+  const keep = specNameFor(ctx);
+  for (const f of fs.readdirSync(dir)) {
+    if (f.startsWith(`case-${ctx.caseId}-`) && f !== keep) {
+      try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
+    }
+  }
+}
+
+/** Scanner estático: faz valer as regras do prompt no spec gerado (não depende do agent obedecer). */
+function staticSpecViolations(src, ctx) {
+  const issues = [];
+  const waits = (src.match(/\.waitForTimeout\(/g) || []).length;
+  if (waits > 0) {
+    issues.push(`page.waitForTimeout usado ${waits}x — substituir por expect(...).toBeVisible()/expect.poll(...)`);
+  }
+  const shots = (src.match(new RegExp(`step-${ctx.caseId}-`, 'g')) || []).length;
+  if (shots < (ctx.steps || []).length) {
+    issues.push(`Screenshots por passo ausentes: esperado ${ctx.steps.length}, encontrado ${shots}`);
+  }
+  if (!/waitForManualLogin/.test(src)) {
+    issues.push('waitForManualLogin não é chamado após a primeira navegação');
+  }
+  return issues;
+}
 
 function parseSteps(tc) {
   let steps = tc.steps;
@@ -93,7 +142,7 @@ function validateSpec(root, specPath) {
   });
 }
 
-function runPlaywright(root, specPath, { headed } = {}) {
+function runPlaywright(root, specPath, { headed, statePath } = {}) {
   return new Promise((resolve) => {
     // Pass relative path as an argument so spaces in the repo folder (e.g. "Novo QA") do not break the CLI.
     const relSpec = path.relative(root, specPath).replace(/\\/g, '/');
@@ -107,12 +156,11 @@ function runPlaywright(root, specPath, { headed } = {}) {
     }
 
     // Reutiliza sessão salva (login SSO manual) entre casos da fila.
-    const statePath = path.join(root, 'artifacts', '.state.json');
-    if (fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1') env.PLAYWRIGHT_STATE = statePath;
+    if (statePath && fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1') env.PLAYWRIGHT_STATE = statePath;
 
     // Limpa artefatos da execução anterior para não reutilizar evidência/erro obsoleta.
-    for (const rel of ['artifacts/report.json', 'artifacts/test-results']) {
-      try { fs.rmSync(path.join(root, rel), { recursive: true, force: true }); } catch { /* ignore */ }
+    for (const rel of ['artifacts/report.json', 'artifacts/test-results', 'artifacts/html-report']) {
+      try { removeDirSync(path.join(root, rel)); } catch { /* ignore */ }
     }
 
     const child = spawnCmd('npx', ['playwright', 'test', relSpec, '--config', 'playwright.config.js'], {
@@ -127,13 +175,13 @@ function runPlaywright(root, specPath, { headed } = {}) {
     const timer = setTimeout(() => {
       log += '\n[agent-runner] Playwright excedeu o tempo limite e foi encerrado.\n';
       treeKill(child);
-      finish({ exitCode: 1, log });
+      finish({ exitCode: 1, log, infraTimeout: true });
     }, timeoutMs);
     timer.unref?.();
 
     child.stdout.on('data', (d) => { const t = d.toString(); log += t; process.stdout.write(t); });
     child.stderr.on('data', (d) => { const t = d.toString(); log += t; process.stderr.write(t); });
-    child.on('error', (err) => { clearTimeout(timer); finish({ exitCode: 1, log: String(err.message) }); });
+    child.on('error', (err) => { clearTimeout(timer); finish({ exitCode: 1, log: String(err.message), infraTimeout: true }); });
     child.on('close', (code) => {
       clearTimeout(timer);
       finish({ exitCode: code ?? 1, log, reportErrors: parsePlaywrightReport(root) });
@@ -141,9 +189,25 @@ function runPlaywright(root, specPath, { headed } = {}) {
   });
 }
 
-async function postBlocked(tc, agentKey, notes) {
-  const steps = parseSteps(tc);
-  return api.createExecution({
+/** Grava a execução com retry (em studioApi) e fallback local se a API cair — o veredito nunca se perde. */
+async function recordExecution(root, payload, tc) {
+  try {
+    const exec = await api.createExecution(payload);
+    return { exec, recorded: true };
+  } catch (err) {
+    const dir = path.join(root, 'artifacts', 'failed-executions');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `exec-${Date.now()}-${String(tc.code || tc.id).replace(/[^\w.-]/g, '_')}.json`);
+    try {
+      fs.writeFileSync(file, JSON.stringify({ error: err.message, payload }, null, 2), 'utf8');
+    } catch { /* ignore */ }
+    console.error(`[agent-runner] Não foi possível gravar a execução no QA Studio (${err.message}). Veredito preservado em ${file}`);
+    return { exec: null, recorded: false, file };
+  }
+}
+
+async function postBlocked(tc, agentKey, notes, root) {
+  const payload = {
     project_id: tc.project_id,
     task_id: tc.task_id,
     test_case_id: tc.id,
@@ -152,12 +216,13 @@ async function postBlocked(tc, agentKey, notes) {
     result: 'Bloqueado',
     actual_result: notes,
     notes,
-    step_results: steps.map((s) => ({
+    step_results: parseSteps(tc).map((s) => ({
       order: s.order,
       actual: notes,
       result: 'Não Executado'
     }))
-  });
+  };
+  return recordExecution(root, payload, tc);
 }
 
 function fallbackJudgment(steps, runOut) {
@@ -188,9 +253,94 @@ function fallbackJudgment(steps, runOut) {
   };
 }
 
+/** Valida a estrutura mínima da coleção Postman (method + url por request). */
+function validateApiCollection(collection) {
+  const issues = [];
+  const walk = (items) => {
+    for (const it of items || []) {
+      if (it.item) { walk(it.item); continue; }
+      const req = it.request || {};
+      const method = String(req.method || '').trim().toUpperCase();
+      const urlRaw = typeof req.url === 'string' ? req.url : (req.url?.raw || '');
+      if (!/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method)) {
+        issues.push(`Item "${it.name || '(sem nome)'}" sem method HTTP válido`);
+      }
+      if (!String(urlRaw || '').trim()) {
+        issues.push(`Item "${it.name || '(sem nome)'}" sem url`);
+      }
+    }
+  };
+  walk(collection?.item);
+  return issues;
+}
+
+/** Empacota screenshots + report + html + test-results + spec em artifacts/runs/<ts>-<code>/ e poda o histórico. */
+function bundleEvidence(root, { caseCode, caseId, artifactPath, runOut, judgment }) {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeCode = String(caseCode || caseId).replace(/[^\w.-]/g, '_');
+  const dir = path.join(root, 'artifacts', 'runs', `run-${ts}-${safeCode}`);
+  fs.mkdirSync(path.join(dir, 'screenshots'), { recursive: true });
+  const copy = (src, rel) => {
+    try {
+      if (!fs.existsSync(src)) return;
+      const dest = path.join(dir, rel);
+      if (fs.statSync(src).isDirectory()) copyDirSync(src, dest);
+      else fs.copyFileSync(src, dest);
+    } catch (e) { console.warn(`[agent-runner] Aviso: não foi possível copiar ${rel}: ${e.message}`); }
+  };
+  copy(path.join(root, 'artifacts', 'report.json'), 'report.json');
+  copy(path.join(root, 'artifacts', 'html-report'), 'html-report');
+  copy(path.join(root, 'artifacts', 'test-results'), 'test-results');
+  if (artifactPath) copy(artifactPath, path.basename(artifactPath));
+  for (const s of runOut.screenshots || []) {
+    try { fs.copyFileSync(s, path.join(dir, 'screenshots', path.basename(s))); } catch { /* ignore */ }
+  }
+  if (judgment) {
+    const slim = { result: judgment.result, actual_result: judgment.actual_result, notes: judgment.notes, step_results: judgment.step_results };
+    try { fs.writeFileSync(path.join(dir, 'judgment.json'), JSON.stringify(slim, null, 2), 'utf8'); } catch { /* ignore */ }
+  }
+  pruneRuns(root);
+  return dir;
+}
+
+/** Gera (ou reusa) o spec com cache por hash, valida compilação e faz valer as regras, com 1 regeneração. */
+async function ensureSpec(ctx, { root, agentKey, reuseSpec }) {
+  const specPath = path.join(root, '.generated', specNameFor(ctx));
+  cleanStaleGenerated(root, ctx);
+  const gen = (fixHint) => generateSpec(ctx, { agentName: agentKey, cwd: root, fixHint, specPath });
+
+  if (reuseSpec && fs.existsSync(specPath)) {
+    const violations = staticSpecViolations(fs.readFileSync(specPath, 'utf8'), ctx);
+    if (violations.length) {
+      console.warn('[agent-runner] Spec reusado viola regras; regenerando...');
+      console.warn('  - ' + violations.join('\n  - '));
+      await gen(violations.join('\n'));
+    } else {
+      console.log(`[agent-runner] Reusando spec: ${specPath}`);
+    }
+  } else {
+    console.log('[agent-runner] Gerando spec Playwright...');
+    await gen();
+  }
+
+  for (let round = 0; round < 2; round++) {
+    const src = fs.readFileSync(specPath, 'utf8');
+    const violations = staticSpecViolations(src, ctx);
+    const compileErr = await validateSpec(root, specPath);
+    if (!compileErr && !violations.length) return specPath;
+    if (round === 1) {
+      throw new InfraError(`Spec inválido após regeneração:\n${compileErr || violations.join('\n')}`);
+    }
+    const reason = compileErr ? `erro de compilação` : 'regras violadas';
+    console.warn(`[agent-runner] Regenerando spec (${reason})...`);
+    await gen(compileErr || violations.join('\n'));
+  }
+  return specPath;
+}
+
 /**
  * Run a single Studio test case (UI Playwright or API Postman).
- * @returns {{ ok: boolean, result: string, executionId?: number, code: string }}
+ * @returns {{ ok: boolean, result: string, executionId?: number, code: string, recorded?: boolean, evidenceDir?: string, error?: string }}
  */
 async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudge } = {}) {
   const cwd = root;
@@ -217,38 +367,44 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
   console.log(`[agent-runner] Caso ${tc.code} (${tc.type}) via agent:${agentKey}`);
 
   let judgment;
+  let artifactPath;
+  let runOut = {};
   try {
-    let runOut;
     if (API_TYPES.has(tc.type)) {
       console.log('[agent-runner] Gerando coleção Postman...');
-      const { collection, persistedPath } = await generateApiCollection(ctx, { agentName: agentKey, cwd });
+      let { collection, collectionPath, persistedPath } = await generateApiCollection(ctx, { agentName: agentKey, cwd });
+      artifactPath = collectionPath;
       console.log(`[agent-runner] Coleção persistida: ${persistedPath}`);
+
+      let issues = validateApiCollection(collection);
+      if (issues.length) {
+        console.warn('[agent-runner] Coleção inválida; regenerando...');
+        ({ collection, collectionPath } = await generateApiCollection(ctx, { agentName: agentKey, cwd, fixHint: issues.join('\n') }));
+        artifactPath = collectionPath;
+        issues = validateApiCollection(collection);
+      }
+      if (issues.length) {
+        throw new InfraError(`Coleção Postman inválida após regeneração:\n${issues.join('\n')}`);
+      }
+
       console.log('[agent-runner] Executando requests...');
       runOut = await runPostmanCollection(collection, { baseURL: ctx.baseURL });
       process.stdout.write(runOut.log);
     } else {
-      cleanCaseScreenshots(cwd, tc.id);
-      const specPath = path.join(cwd, '.generated', `case-${tc.id}.spec.ts`);
-      if (reuseSpec && fs.existsSync(specPath)) {
-        console.log(`[agent-runner] Reusando spec existente: ${specPath}`);
-      } else {
-        console.log('[agent-runner] Gerando spec Playwright...');
-        let gen = await generateSpec(ctx, { agentName: agentKey, cwd });
-        console.log(`[agent-runner] Spec: ${gen.specPath} (persistida: ${gen.persistedPath})`);
-
-        let specErr = await validateSpec(cwd, specPath);
-        if (specErr) {
-          console.warn('[agent-runner] Spec não compilou; regenerando com o erro...');
-          gen = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: specErr });
-          console.log(`[agent-runner] Spec regenerada: ${gen.specPath}`);
-          specErr = await validateSpec(cwd, specPath);
-          if (specErr) {
-            throw new Error(`Spec inválido mesmo após regeneração:\n${specErr}`);
-          }
-        }
+      const statePath = statePathFor(ctx.baseURL);
+      if (!headed && !fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1' && process.env.SSO_HEADLESS_WAIT !== '1') {
+        throw new InfraError(
+          `SSO requer login manual, mas a execução é headless e não há sessão salva. ` +
+          `Rode o primeiro caso sem --headless para salvar a sessão (${path.relative(root, statePath)}), ` +
+          `ou defina SSO_HEADLESS_WAIT=1 para aguardar a confirmação "Já fiz login" do Studio.`
+        );
       }
+      cleanCaseScreenshots(cwd, tc.id);
+      const specPath = await ensureSpec(ctx, { root, agentKey, reuseSpec });
+      artifactPath = specPath;
+
       console.log('[agent-runner] Executando Playwright...');
-      runOut = await runPlaywright(cwd, specPath, { headed });
+      runOut = await runPlaywright(cwd, specPath, { headed, statePath });
       runOut.screenshots = collectScreenshots(cwd, tc.id);
       if (runOut.screenshots.length < steps.length) {
         console.warn(
@@ -272,13 +428,37 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     if (!judgment.step_results?.length && steps.length) {
       judgment = { ...judgment, ...fallbackJudgment(steps, runOut), notes: judgment.notes };
     }
+    // Timeout de infraestrutura do Playwright não é um veredito real → Bloqueado (retryável).
+    if (runOut.infraTimeout) {
+      judgment = {
+        ...judgment,
+        result: 'Bloqueado',
+        notes: (judgment.notes || '') + ' | Timeout de infraestrutura do Playwright.'
+      };
+    }
   } catch (err) {
     console.error('[agent-runner] Falha no fluxo:', err.message);
-    const exec = await postBlocked(tc, agentKey, err.message);
-    return { ok: false, result: 'Bloqueado', executionId: exec.id, code: tc.code, error: err.message };
+    const { exec, recorded, file } = await postBlocked(tc, agentKey, err.message, root);
+    const evidenceDir = bundleEvidence(root, {
+      caseCode: tc.code,
+      caseId: tc.id,
+      artifactPath,
+      runOut,
+      judgment: { result: 'Bloqueado', actual_result: err.message, notes: '', step_results: [] }
+    });
+    return {
+      ok: false,
+      result: 'Bloqueado',
+      executionId: exec?.id,
+      code: tc.code,
+      error: err.message,
+      recorded,
+      evidenceDir,
+      fallbackFile: file
+    };
   }
 
-  const exec = await api.createExecution({
+  const payload = {
     project_id: tc.project_id,
     task_id: tc.task_id,
     test_case_id: tc.id,
@@ -288,19 +468,25 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     actual_result: judgment.actual_result,
     notes: judgment.notes,
     step_results: judgment.step_results
-  });
+  };
+  const { exec, recorded, file } = await recordExecution(root, payload, tc);
+  const evidenceDir = bundleEvidence(root, { caseCode: tc.code, caseId: tc.id, artifactPath, runOut, judgment });
 
-  console.log(`[agent-runner] Execução id=${exec.id} result=${judgment.result}`);
+  console.log(`[agent-runner] Execução id=${exec?.id || 'N/A'} result=${judgment.result}`);
   return {
     ok: judgment.result === 'Passou',
     result: judgment.result,
-    executionId: exec.id,
-    code: tc.code
+    executionId: exec?.id,
+    code: tc.code,
+    recorded,
+    evidenceDir,
+    error: recorded ? undefined : file
   };
 }
 
 module.exports = {
   runOneCase,
+  InfraError,
   ALLOWED_TYPES,
   UI_TYPES,
   API_TYPES,

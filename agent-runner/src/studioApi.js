@@ -26,6 +26,7 @@ async function request(path, options = {}, attempt = 0) {
     res = await fetchWithTimeout(path, options);
   } catch (err) {
     if (attempt < MAX_RETRIES && err.name === 'AbortError') {
+      await sleep(500 * (attempt + 1));
       return request(path, options, attempt + 1);
     }
     throw new Error(
@@ -38,10 +39,19 @@ async function request(path, options = {}, attempt = 0) {
       const j = await res.json();
       msg = j.error || msg;
     } catch { /* ignore */ }
+    // Retenta falhas transitórias de servidor (5xx) com backoff.
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      await sleep(500 * (attempt + 1));
+      return request(path, options, attempt + 1);
+    }
     throw new Error(`API ${options.method || 'GET'} ${path}: HTTP ${res.status} — ${msg}`);
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function getTestCase(caseId) {

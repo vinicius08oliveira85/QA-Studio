@@ -1,8 +1,19 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const MARKER = path.join(__dirname, '..', 'artifacts', '.sso-ready');
-const STATE_PATH = path.join(__dirname, '..', 'artifacts', '.state.json');
+
+/** Deriva um nome de state file por origin para não reutilizar cookies de outro ambiente. */
+function originHash(baseURL) {
+  let origin = String(baseURL || '');
+  try { origin = new URL(origin).origin; } catch { /* mantém raw */ }
+  return crypto.createHash('sha256').update(origin).digest('hex').slice(0, 8);
+}
+
+function statePathFor(baseURL) {
+  return path.join(__dirname, '..', 'artifacts', `sso-state-${originHash(baseURL)}.json`);
+}
 
 function clearSsoMarker() {
   try { fs.unlinkSync(MARKER); } catch { /* ignore */ }
@@ -17,9 +28,10 @@ function signalSsoContinue() {
 async function saveState(page) {
   if (process.env.SSO_STATE_OFF === '1') return;
   try {
-    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-    await page.context().storageState({ path: STATE_PATH });
-    console.log('[SSO] Sessão salva para reuso na fila (artifacts/.state.json).');
+    const target = statePathFor(page.url() || process.env.TARGET_BASE_URL);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    await page.context().storageState({ path: target });
+    console.log(`[SSO] Sessão salva para reuso na fila (${path.basename(target)}).`);
   } catch (err) {
     console.warn('[SSO] Não foi possível salvar a sessão:', err.message);
   }
@@ -71,4 +83,4 @@ async function waitForManualLogin(page, opts = {}) {
   throw new Error('Timeout aguardando login SSO manual (15 min). Clique em "Já fiz login" no Studio após autenticar.');
 }
 
-module.exports = { waitForManualLogin, clearSsoMarker, signalSsoContinue, MARKER, STATE_PATH, saveState, isLoggedIn };
+module.exports = { waitForManualLogin, clearSsoMarker, signalSsoContinue, MARKER, saveState, isLoggedIn, originHash, statePathFor };

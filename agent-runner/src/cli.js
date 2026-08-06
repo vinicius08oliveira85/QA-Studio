@@ -15,7 +15,7 @@ try {
 }
 
 const api = require('./studioApi');
-const { parseArgs, checkUrl } = require('./utils');
+const { parseArgs, checkUrl, sleep } = require('./utils');
 const { getAdapter } = require('./agents');
 const { runOneCase, ALLOWED_TYPES } = require('./runCase');
 
@@ -75,28 +75,44 @@ async function main() {
   }
 
   const results = [];
+  const caseRetries = Number(process.env.CASE_RETRIES || 1);
+
   for (const id of caseIds) {
-    try {
-      const r = await runOneCase(id, {
-        root: ROOT,
-        agentName: agentKey,
-        headed: args.headed,
-        reuseSpec: args.reuseSpec,
-        skipJudge: args.skipJudge
-      });
-      results.push(r);
-    } catch (err) {
-      console.error(`[agent-runner] Caso ${id} erro:`, err.message);
-      results.push({ ok: false, result: 'Bloqueado', code: String(id), error: err.message });
+    let last = null;
+    for (let attempt = 0; attempt <= caseRetries; attempt++) {
+      if (attempt > 0) {
+        await sleep(2000 * attempt);
+        console.log(`[agent-runner] Retentando caso ${id} (tentativa ${attempt + 1}/${caseRetries + 1})...`);
+      }
+      try {
+        const r = await runOneCase(id, {
+          root: ROOT,
+          agentName: agentKey,
+          headed: args.headed,
+          reuseSpec: args.reuseSpec,
+          skipJudge: args.skipJudge
+        });
+        last = r;
+        // Só infra (Bloqueado) é retryável; veredito Falhou/Passou é definitivo.
+        if (r.result !== 'Bloqueado' || attempt >= caseRetries) break;
+        console.warn(`[agent-runner] Caso ${id} Bloqueado por infraestrutura — retry...`);
+      } catch (err) {
+        console.error(`[agent-runner] Caso ${id} erro de infra:`, err.message);
+        last = { ok: false, result: 'Bloqueado', code: String(id), error: err.message };
+        if (attempt >= caseRetries) break;
+      }
     }
+    results.push(last);
   }
 
   const failed = results.filter((r) => !r.ok).length;
   console.log(`[agent-runner] Concluído: ${results.length - failed}/${results.length} Passou`);
   for (const r of results) {
-    console.log(`  - ${r.code}: ${r.result}${r.executionId ? ` (exec #${r.executionId})` : ''}`);
+    console.log(`  - ${r.code}: ${r.result}${r.executionId ? ` (exec #${r.executionId})` : ''}${r.recorded === false ? ' (NÃO gravado — fallback local)' : ''}`);
+    if (r.evidenceDir) console.log(`      evidência: ${r.evidenceDir}`);
+    if (r.error) console.log(`      erro: ${r.error}`);
   }
-  console.log('[agent-runner] Relatório visual: npx playwright show-report artifacts/html-report');
+  console.log('[agent-runner] Relatório visual da fila: npx playwright show-report artifacts/html-report');
   process.exit(failed ? 1 : 0);
 }
 
