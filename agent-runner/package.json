@@ -6,11 +6,12 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/cli.js",
+    "test:agent": "node src/cli.js",
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
     "@playwright/test": "^1.51.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.6.1"
   },
   "optionalDependencies": {
     "@cursor/sdk": "^1.0.0"

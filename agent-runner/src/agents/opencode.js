@@ -3,6 +3,18 @@ const os = require('os');
 const path = require('path');
 const { spawnCmd } = require('../utils');
 
+/**
+ * OpenCode (provider Google) lê GOOGLE_GENERATIVE_AI_API_KEY.
+ * O Studio já usa GEMINI_API_KEY no .env — reaproveita para não exigir chave duplicada.
+ */
+function envForOpenCode() {
+  const env = { ...process.env };
+  if (!env.GOOGLE_GENERATIVE_AI_API_KEY && env.GEMINI_API_KEY) {
+    env.GOOGLE_GENERATIVE_AI_API_KEY = env.GEMINI_API_KEY;
+  }
+  return env;
+}
+
 /** Prefer writing prompt to temp file + stdin to avoid Windows arg length limits. */
 async function prompt(text, opts = {}) {
   const tmp = path.join(os.tmpdir(), `qa-agent-opencode-${Date.now()}.txt`);
@@ -10,13 +22,15 @@ async function prompt(text, opts = {}) {
   try {
     const bin = process.env.OPENCODE_BIN || 'opencode';
     const args = ['run'];
-    if (process.env.OPENCODE_MODEL) args.push('--model', process.env.OPENCODE_MODEL);
+    // Modelo de imagem (ex.: gemini-*-image*) não gera spec; preferir um modelo de texto.
+    const model = process.env.OPENCODE_MODEL || 'google/gemini-2.5-flash';
+    if (model) args.push('--model', model);
     if (process.env.OPENCODE_AUTO !== '0') args.push('--auto');
 
     const result = await new Promise((resolve, reject) => {
       const child = spawnCmd(bin, args, {
         cwd: opts.cwd || process.cwd(),
-        env: process.env
+        env: envForOpenCode()
       });
       let stdout = '';
       let stderr = '';

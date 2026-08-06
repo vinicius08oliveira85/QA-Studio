@@ -31,6 +31,7 @@ ${fixHint}
 5. Navigate with RELATIVE paths only: await page.goto('/...') (page.goto('/') for the root). NEVER hardcode an absolute origin (http://...). baseURL is already set in the Playwright config from TARGET_BASE_URL.
 6. Wrap the actions of each step N in: await test.step('Passo N — <short title>', async () => { ... });
 7. After the first navigation, call await waitForManualLogin(page, { force: true }) once for SSO. Do NOT call it again later if already logged in.
+7b. Microsoft / corporate SSO: the landing page often shows only "Entrar com Microsoft" (NO input[type=email] / password). Assert that button (or an already-logged-in signal like "Sair"), click it if present, then waitForManualLogin. NEVER require email/password fields on the first screen unless they are actually visible.
 8. After login, assert session with resilient checks (e.g. button "Sair", navigation visible, OR url matching /dashboard|/agendas|/atendimento) — never require a single exact path.
 9. Interpret hierarchical step paths like "A / B > C > D > E" literally left-to-right:
    - First segments may be sidebar/menu (e.g. Atendimento → Ambulatorial).
@@ -39,7 +40,7 @@ ${fixHint}
 10. Map each step action to Playwright locators/actions; use massa data where relevant.
 11. After each step N, call: await page.screenshot({ path: 'artifacts/step-${ctx.caseId}-N.png', fullPage: true });
 12. Soft-assert expected outcomes with expect(...). Prefer resilient selectors (role, label, text).
-13. Do NOT hardcode passwords or try to automate SSO credentials.
+13. Do NOT hardcode passwords or try to automate SSO credentials. Even if steps/mass contain a username/password, treat login as manual Microsoft SSO via waitForManualLogin.
 14. SYNCHRONIZATION: never use page.waitForTimeout() to wait for app state. Wait with expect(locator).toBeVisible()/toContainText(), expect.poll(...) or test.step(...) with real conditions. The only allowed fixed delays are the per-step screenshots.
 15. File must be self-contained and runnable by: npx playwright test
 16. SUT ERROR DETECTION: after EVERY navigation/action, if the page shows a system error/empty-state message (patterns: /não foi possível|erro ao|falha ao|ocorreu um erro|não carregou|indisponível|sem dados/i), capture the visible message text and fail immediately with: throw new Error('SUT_ERROR: ' + <texto visível>). Do NOT silently work around it or keep waiting for data that will never load — the runner treats this as an environment failure.
