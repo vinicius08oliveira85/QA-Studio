@@ -210,6 +210,8 @@ function Shell() {
         <main className="content">
           <ConnectionBanner />
           <Routes>
+            {/* Configurações não dependem de projeto: precisa abrir antes do primeiro. */}
+            <Route path="/configuracoes" element={<Settings />} />
             <Route path="*" element={<Projects />} />
           </Routes>
         </main>

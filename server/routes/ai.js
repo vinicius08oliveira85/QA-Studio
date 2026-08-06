@@ -14,6 +14,20 @@ function extractJson(text) {
   return null;
 }
 
+/** Traduz o status da API do Gemini em uma mensagem acionável para o usuário. */
+function geminiErrorMessage(status, model) {
+  if (status === 429) {
+    return `Cota da API Gemini esgotada para o modelo "${model}". Escolha outro modelo em Configurações (ex.: gemini-2.5-flash) ou tente mais tarde.`;
+  }
+  if (status === 400 || status === 401 || status === 403) {
+    return 'A chave da API Gemini foi recusada. Confira a chave em Configurações ou no arquivo .env.';
+  }
+  if (status === 404) {
+    return `O modelo "${model}" não está disponível para esta chave. Escolha outro em Configurações.`;
+  }
+  return 'Erro ao chamar a API do Gemini. Tente novamente.';
+}
+
 module.exports = (db) => {
   const router = express.Router();
 
@@ -54,7 +68,7 @@ module.exports = (db) => {
       if (!resp.ok) {
         const msg = data?.error?.message || `HTTP ${resp.status}`;
         console.error('[gemini]', resp.status, msg);
-        return res.status(502).json({ error: 'Erro ao chamar a API do Gemini. Tente novamente.' });
+        return res.status(502).json({ error: geminiErrorMessage(resp.status, model) });
       }
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       const content = extractJson(text);
