@@ -199,25 +199,16 @@ function ConnectionBanner() {
   );
 }
 
-function Shell() {
-  const { current, loading } = useApp();
-  if (loading) return <div className="boot">Carregando...</div>;
+/** Rotas que exigem projeto ativo; sem projeto redireciona para /projetos. */
+function RequireProject() {
+  const { current } = useApp();
+  if (!current) return <Navigate to="/projetos" replace />;
+  return <Outlet />;
+}
 
-  if (!current) {
-    return (
-      <div className="layout">
-        <Sidebar />
-        <main className="content">
-          <ConnectionBanner />
-          <Routes>
-            {/* Configurações não dependem de projeto: precisa abrir antes do primeiro. */}
-            <Route path="/configuracoes" element={<Settings />} />
-            <Route path="*" element={<Projects />} />
-          </Routes>
-        </main>
-      </div>
-    );
-  }
+function Shell() {
+  const { loading } = useApp();
+  if (loading) return <div className="boot">Carregando...</div>;
 
   return (
     <div className="layout">
@@ -225,41 +216,45 @@ function Shell() {
       <main className="content">
         <ConnectionBanner />
         <Routes>
-          <Route path="/" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/tarefas" element={<Tasks />} />
-          <Route path="/dashboard" element={<Dashboard scope="project" />} />
+          {/* Públicas: disponíveis antes do primeiro projeto */}
           <Route path="/projetos" element={<Projects />} />
-
-          <Route path="/tarefas/:taskId" element={<TaskWorkspace />}>
-            <Route index element={<Dashboard scope="task" />} />
-            <Route path="requisitos" element={<Requirements />} />
-            <Route path="estrategia" element={<Strategies />} />
-            <Route path="cenarios" element={<Scenarios />} />
-            <Route path="casos" element={<TestCases />} />
-            <Route path="massa" element={<TestMass />} />
-            <Route path="execucao/fumaca" element={<Execution type="Fumaça" />} />
-            <Route path="execucao/funcional" element={<Execution type="Funcional" />} />
-            <Route path="execucao/api" element={<Execution type="API" />} />
-            <Route path="bugs" element={<Bugs />} />
-            <Route path="reteste" element={<Retests />} />
-          </Route>
-
-          <Route path="/regressao" element={<Regression />} />
-          <Route path="/regressao/:id" element={<RegressionDetail />} />
-          <Route path="/automacao" element={<Automations />} />
-          <Route path="/homologacao" element={<Releases />} />
-          <Route path="/homologacao/:id" element={<ReleaseDetail />} />
           <Route path="/configuracoes" element={<Settings />} />
 
-          <Route path="/requisitos" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/estrategia" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/cenarios" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/casos" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/massa" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/bugs" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/reteste" element={<Navigate to="/tarefas" replace />} />
-          <Route path="/execucao/*" element={<Navigate to="/tarefas" replace />} />
-          <Route path="*" element={<Navigate to="/tarefas" replace />} />
+          <Route element={<RequireProject />}>
+            <Route path="/" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/tarefas" element={<Tasks />} />
+            <Route path="/dashboard" element={<Dashboard scope="project" />} />
+
+            <Route path="/tarefas/:taskId" element={<TaskWorkspace />}>
+              <Route index element={<Dashboard scope="task" />} />
+              <Route path="requisitos" element={<Requirements />} />
+              <Route path="estrategia" element={<Strategies />} />
+              <Route path="cenarios" element={<Scenarios />} />
+              <Route path="casos" element={<TestCases />} />
+              <Route path="massa" element={<TestMass />} />
+              <Route path="execucao/fumaca" element={<Execution type="Fumaça" />} />
+              <Route path="execucao/funcional" element={<Execution type="Funcional" />} />
+              <Route path="execucao/api" element={<Execution type="API" />} />
+              <Route path="bugs" element={<Bugs />} />
+              <Route path="reteste" element={<Retests />} />
+            </Route>
+
+            <Route path="/regressao" element={<Regression />} />
+            <Route path="/regressao/:id" element={<RegressionDetail />} />
+            <Route path="/automacao" element={<Automations />} />
+            <Route path="/homologacao" element={<Releases />} />
+            <Route path="/homologacao/:id" element={<ReleaseDetail />} />
+
+            <Route path="/requisitos" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/estrategia" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/cenarios" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/casos" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/massa" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/bugs" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/reteste" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/execucao/*" element={<Navigate to="/tarefas" replace />} />
+            <Route path="*" element={<Navigate to="/tarefas" replace />} />
+          </Route>
         </Routes>
       </main>
     </div>
