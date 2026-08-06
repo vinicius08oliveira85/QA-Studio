@@ -42,6 +42,7 @@ ${fixHint}
 13. Do NOT hardcode passwords or try to automate SSO credentials.
 14. SYNCHRONIZATION: never use page.waitForTimeout() to wait for app state. Wait with expect(locator).toBeVisible()/toContainText(), expect.poll(...) or test.step(...) with real conditions. The only allowed fixed delays are the per-step screenshots.
 15. File must be self-contained and runnable by: npx playwright test
+16. SUT ERROR DETECTION: after EVERY navigation/action, if the page shows a system error/empty-state message (patterns: /não foi possível|erro ao|falha ao|ocorreu um erro|não carregou|indisponível|sem dados/i), capture the visible message text and fail immediately with: throw new Error('SUT_ERROR: ' + <texto visível>). Do NOT silently work around it or keep waiting for data that will never load — the runner treats this as an environment failure.
 `;
 }
 

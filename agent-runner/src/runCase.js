@@ -284,6 +284,19 @@ function massVars(mass) {
   return vars;
 }
 
+/** Extrai mensagens "SUT_ERROR: <texto>" lançadas pelo spec (tela de erro do SUT). */
+function detectSutErrors(runOut) {
+  const src = [runOut?.reportErrors || [], runOut?.log || ''].join('\n---\n');
+  const found = [];
+  const re = /SUT_ERROR:\s*([^\r\n]+)/gi;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const text = m[1].trim();
+    if (text && !found.some((f) => f === text)) found.push(text);
+  }
+  return found.slice(0, 5);
+}
+
 /** Empacota screenshots + report + html + test-results + spec em artifacts/runs/<ts>-<code>/ e poda o histórico. */
 function bundleEvidence(root, { caseCode, caseId, artifactPath, runOut, judgment, execution }) {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -438,6 +451,27 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       runOut = await runPlaywright(cwd, specPath, { headed, statePath });
       runOut.screenshots = collectScreenshots(cwd, tc.id);
       mark('run');
+
+      // Tela de erro do SUT: regenera o spec UMA vez com o contexto e re-executa.
+      const firstSut = detectSutErrors(runOut);
+      if (firstSut.length) {
+        console.warn(`[agent-runner] Tela de erro do SUT detectada; regenerando spec e re-executando...`);
+        console.warn('  - ' + firstSut.join('\n  - '));
+        const hint = `A tela exibiu erro do sistema: ${firstSut.join(' | ')}. ` +
+          `Ajuste o fluxo (navegação/seleções/esperas) para o sistema carregar a tela de fato. ` +
+          `Se após tentar o erro persistir, falhe com throw new Error('SUT_ERROR: ' + <texto>).`;
+        const newSpec = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: hint, specPath });
+        const compileErr = await validateSpec(root, newSpec);
+        if (!compileErr) {
+          artifactPath = newSpec;
+          runOut = await runPlaywright(cwd, newSpec, { headed, statePath });
+          runOut.screenshots = collectScreenshots(cwd, tc.id);
+          mark('run');
+        } else {
+          console.warn('[agent-runner] Spec regenerado não compilou; mantendo resultado original.');
+        }
+      }
+
       if (runOut.screenshots.length < steps.length) {
         console.warn(
           `[agent-runner] Aviso: ${steps.length} passo(s), ${runOut.screenshots.length} screenshot(s) capturada(s) — evidência incompleta para o judge.`
@@ -460,6 +494,16 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     mark('judge');
     if (!judgment.step_results?.length && steps.length) {
       judgment = { ...judgment, ...fallbackJudgment(steps, runOut), notes: judgment.notes };
+    }
+    // Tela de erro do SUT não é um veredito do teste → Bloqueado (ambiente, retryável).
+    const sutErrors = detectSutErrors(runOut);
+    if (sutErrors.length) {
+      judgment = {
+        ...judgment,
+        result: 'Bloqueado',
+        actual_result: sutErrors.join('\n'),
+        notes: (judgment.notes || '') + ' | Falha de ambiente no SUT: ' + sutErrors.join(' | ')
+      };
     }
     // Timeout de infraestrutura do Playwright não é um veredito real → Bloqueado (retryável).
     if (runOut.infraTimeout) {

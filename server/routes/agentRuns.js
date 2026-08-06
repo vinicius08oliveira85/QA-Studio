@@ -102,6 +102,17 @@ function spawnRunner(job, args) {
   });
 }
 
+/** Campos não serializáveis do job (handles/objetos circulares) — nunca expor via JSON. */
+const NON_SERIALIZABLE = new Set(['timeoutTimer']);
+
+function publicJob(job) {
+  const out = {};
+  for (const k of Object.keys(job)) {
+    if (!NON_SERIALIZABLE.has(k)) out[k] = job[k];
+  }
+  return out;
+}
+
 module.exports = (db) => {
   const router = express.Router();
 
@@ -109,14 +120,14 @@ module.exports = (db) => {
     const list = [...jobs.values()]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, 30)
-      .map(({ log, ...rest }) => ({ ...rest, logPreview: sanitizeLog(log).slice(-500) }));
+      .map((job) => ({ ...publicJob(job), logPreview: sanitizeLog(job.log).slice(-500) }));
     res.json(list);
   });
 
   router.get('/:id', (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job não encontrado' });
-    res.json({ ...job, log: sanitizeLog(job.log) });
+    res.json({ ...publicJob(job), log: sanitizeLog(job.log) });
   });
 
   /** QA confirms SSO/login done — unblocks waitForManualLogin in Playwright */
