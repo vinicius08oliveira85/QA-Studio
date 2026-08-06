@@ -81,10 +81,40 @@ function aggregateResult(stepResults) {
   return 'Pendente';
 }
 
+/**
+ * Encerra um processo e toda a sua árvore de filhos.
+ * No Windows o kill simples não derruba o Chromium; usa taskkill /T /F.
+ */
+function treeKill(child) {
+  if (!child || child.pid === undefined) return;
+  if (process.platform === 'win32') {
+    try {
+      spawnCmd('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+    } catch { /* falhou em encerrar */ }
+  } else {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* ignore */ } }
+  }
+}
+
+/**
+ * Pré-flight: verifica se a URL alvo responde (qualquer status HTTP conta).
+ * Lança erro apenas em falha de rede/timeout.
+ */
+async function checkUrl(url, timeoutMs = 15_000) {
+  const res = await fetch(url, {
+    method: 'GET',
+    redirect: 'follow',
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  return res.status;
+}
+
 module.exports = {
   extractJson,
   extractCodeFence,
   parseArgs,
   aggregateResult,
-  spawnCmd
+  spawnCmd,
+  treeKill,
+  checkUrl
 };

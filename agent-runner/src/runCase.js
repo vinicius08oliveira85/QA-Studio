@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const api = require('./studioApi');
-const { aggregateResult, spawnCmd } = require('./utils');
+const { aggregateResult, spawnCmd, treeKill } = require('./utils');
 const { generateSpec, generateApiCollection, judge, getAdapter } = require('./agents');
 const { runPostmanCollection } = require('./postmanRunner');
 
@@ -30,6 +30,69 @@ function collectScreenshots(root, caseId) {
     .sort();
 }
 
+/** Remove screenshots de execuções anteriores do mesmo caso para o judge não ver evidência obsoleta. */
+function cleanCaseScreenshots(root, caseId) {
+  const dir = path.join(root, 'artifacts');
+  if (!fs.existsSync(dir)) return;
+  for (const f of fs.readdirSync(dir)) {
+    if (f.startsWith(`step-${caseId}-`) && f.endsWith('.png')) {
+      try { fs.unlinkSync(path.join(dir, f)); } catch { /* arquivo em uso */ }
+    }
+  }
+}
+
+/** Extrai mensagens de erro estruturadas do report.json do Playwright. */
+function parsePlaywrightReport(root) {
+  const p = path.join(root, 'artifacts', 'report.json');
+  if (!fs.existsSync(p)) return [];
+  try {
+    const rep = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const errors = [];
+    for (const suite of rep.suites || []) {
+      for (const spec of suite.specs || []) {
+        for (const t of spec.tests || []) {
+          for (const res of t.results || []) {
+            for (const err of res.errors || []) {
+              if (err?.message) errors.push(err.message.split('\n').slice(0, 12).join('\n'));
+            }
+          }
+        }
+      }
+    }
+    return errors.filter(Boolean).slice(0, 3);
+  } catch { return []; }
+}
+
+/** Compila o spec com `playwright test --list` para validar o TypeScript antes de rodar. */
+function validateSpec(root, specPath) {
+  return new Promise((resolve) => {
+    const relSpec = path.relative(root, specPath).replace(/\\/g, '/');
+    const child = spawnCmd('npx', ['playwright', 'test', relSpec, '--config', 'playwright.config.js', '--list'], {
+      cwd: root,
+      env: { ...process.env, HEADED: '0', HEADLESS: '1' }
+    });
+    let out = '';
+    let settled = false;
+    const finish = (err) => { if (!settled) { settled = true; resolve(err); } };
+
+    const timer = setTimeout(() => {
+      treeKill(child);
+      finish('Tempo limite ao validar o spec (--list).');
+    }, Number(process.env.PLAYWRIGHT_VALIDATE_TIMEOUT_MS) || 90_000);
+    timer.unref?.();
+
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { out += d.toString(); });
+    child.on('error', (err) => { clearTimeout(timer); finish(`Falha ao iniciar o Playwright: ${err.message}`); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) return finish(null);
+      const lines = out.split('\n').filter((l) => l.trim()).slice(0, 20);
+      finish(lines.join('\n') || `Playwright --list saiu com código ${code}.`);
+    });
+  });
+}
+
 function runPlaywright(root, specPath, { headed } = {}) {
   return new Promise((resolve) => {
     // Pass relative path as an argument so spaces in the repo folder (e.g. "Novo QA") do not break the CLI.
@@ -43,6 +106,15 @@ function runPlaywright(root, specPath, { headed } = {}) {
       env.HEADLESS = '1';
     }
 
+    // Reutiliza sessão salva (login SSO manual) entre casos da fila.
+    const statePath = path.join(root, 'artifacts', '.state.json');
+    if (fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1') env.PLAYWRIGHT_STATE = statePath;
+
+    // Limpa artefatos da execução anterior para não reutilizar evidência/erro obsoleta.
+    for (const rel of ['artifacts/report.json', 'artifacts/test-results']) {
+      try { fs.rmSync(path.join(root, rel), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+
     const child = spawnCmd('npx', ['playwright', 'test', relSpec, '--config', 'playwright.config.js'], {
       cwd: root,
       env
@@ -54,7 +126,7 @@ function runPlaywright(root, specPath, { headed } = {}) {
     const timeoutMs = Number(process.env.PLAYWRIGHT_TIMEOUT_MS) || 15 * 60 * 1000;
     const timer = setTimeout(() => {
       log += '\n[agent-runner] Playwright excedeu o tempo limite e foi encerrado.\n';
-      try { child.kill('SIGKILL'); } catch { /* já encerrado */ }
+      treeKill(child);
       finish({ exitCode: 1, log });
     }, timeoutMs);
     timer.unref?.();
@@ -62,7 +134,10 @@ function runPlaywright(root, specPath, { headed } = {}) {
     child.stdout.on('data', (d) => { const t = d.toString(); log += t; process.stdout.write(t); });
     child.stderr.on('data', (d) => { const t = d.toString(); log += t; process.stderr.write(t); });
     child.on('error', (err) => { clearTimeout(timer); finish({ exitCode: 1, log: String(err.message) }); });
-    child.on('close', (code) => { clearTimeout(timer); finish({ exitCode: code ?? 1, log }); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      finish({ exitCode: code ?? 1, log, reportErrors: parsePlaywrightReport(root) });
+    });
   });
 }
 
@@ -87,9 +162,13 @@ async function postBlocked(tc, agentKey, notes) {
 
 function fallbackJudgment(steps, runOut) {
   const blocked = /BLOQUEADO:/i.test(runOut.log || '');
+  const pwErrors = (runOut.reportErrors || []).join('\n---\n');
+  const detail = pwErrors
+    ? `Playwright report.json:\n${pwErrors}`
+    : runOut.log.slice(0, 1000);
   const step_results = steps.map((s) => ({
     order: s.order,
-    actual: runOut.log.slice(0, 500),
+    actual: pwErrors || runOut.log.slice(0, 500),
     result: blocked ? 'Não Executado' : (runOut.exitCode === 0 ? 'Passou' : 'Falhou')
   }));
   if (blocked) {
@@ -103,7 +182,7 @@ function fallbackJudgment(steps, runOut) {
   }
   return {
     result: aggregateResult(step_results),
-    actual_result: runOut.log.slice(0, 1000),
+    actual_result: detail,
     notes: 'Fallback judgment (agent JSON missing)',
     step_results
   };
@@ -148,17 +227,34 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       runOut = await runPostmanCollection(collection, { baseURL: ctx.baseURL });
       process.stdout.write(runOut.log);
     } else {
+      cleanCaseScreenshots(cwd, tc.id);
       const specPath = path.join(cwd, '.generated', `case-${tc.id}.spec.ts`);
       if (reuseSpec && fs.existsSync(specPath)) {
         console.log(`[agent-runner] Reusando spec existente: ${specPath}`);
       } else {
         console.log('[agent-runner] Gerando spec Playwright...');
-        const gen = await generateSpec(ctx, { agentName: agentKey, cwd });
+        let gen = await generateSpec(ctx, { agentName: agentKey, cwd });
         console.log(`[agent-runner] Spec: ${gen.specPath} (persistida: ${gen.persistedPath})`);
+
+        let specErr = await validateSpec(cwd, specPath);
+        if (specErr) {
+          console.warn('[agent-runner] Spec não compilou; regenerando com o erro...');
+          gen = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: specErr });
+          console.log(`[agent-runner] Spec regenerada: ${gen.specPath}`);
+          specErr = await validateSpec(cwd, specPath);
+          if (specErr) {
+            throw new Error(`Spec inválido mesmo após regeneração:\n${specErr}`);
+          }
+        }
       }
       console.log('[agent-runner] Executando Playwright...');
       runOut = await runPlaywright(cwd, specPath, { headed });
       runOut.screenshots = collectScreenshots(cwd, tc.id);
+      if (runOut.screenshots.length < steps.length) {
+        console.warn(
+          `[agent-runner] Aviso: ${steps.length} passo(s), ${runOut.screenshots.length} screenshot(s) capturada(s) — evidência incompleta para o judge.`
+        );
+      }
     }
 
     if (skipJudge) {

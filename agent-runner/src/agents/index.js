@@ -18,9 +18,9 @@ function getAdapter(name) {
   return { key, adapter };
 }
 
-async function generateSpec(ctx, { agentName, cwd } = {}) {
+async function generateSpec(ctx, { agentName, cwd, fixHint } = {}) {
   const { key, adapter } = getAdapter(agentName);
-  const prompt = buildGeneratePrompt(ctx);
+  const prompt = buildGeneratePrompt(ctx, { fixHint });
   const raw = await adapter.prompt(prompt, { cwd });
   const code = extractCodeFence(raw, 'typescript') || extractCodeFence(raw, 'ts');
   if (!code || !/test\s*\(/.test(code)) {

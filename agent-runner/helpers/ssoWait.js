@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const MARKER = path.join(__dirname, '..', 'artifacts', '.sso-ready');
+const STATE_PATH = path.join(__dirname, '..', 'artifacts', '.state.json');
 
 function clearSsoMarker() {
   try { fs.unlinkSync(MARKER); } catch { /* ignore */ }
@@ -10,6 +11,18 @@ function clearSsoMarker() {
 function signalSsoContinue() {
   fs.mkdirSync(path.dirname(MARKER), { recursive: true });
   fs.writeFileSync(MARKER, String(Date.now()), 'utf8');
+}
+
+/** Salva cookies/storage da sessão para o próximo caso da fila reutilizar o login (SSO_STATE_OFF=1 desliga). */
+async function saveState(page) {
+  if (process.env.SSO_STATE_OFF === '1') return;
+  try {
+    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
+    await page.context().storageState({ path: STATE_PATH });
+    console.log('[SSO] Sessão salva para reuso na fila (artifacts/.state.json).');
+  } catch (err) {
+    console.warn('[SSO] Não foi possível salvar a sessão:', err.message);
+  }
 }
 
 async function isLoggedIn(page) {
@@ -42,12 +55,14 @@ async function waitForManualLogin(page, opts = {}) {
     if (fs.existsSync(MARKER)) {
       clearSsoMarker();
       console.log('[SSO] Confirmação recebida — retomando o teste.');
+      await saveState(page);
       await page.waitForTimeout(800);
       return;
     }
     // Sempre detecta sessão após o usuário concluir SSO, mesmo com force:true
     if (await isLoggedIn(page)) {
       console.log('[SSO] Login detectado automaticamente — retomando.');
+      await saveState(page);
       return;
     }
     await page.waitForTimeout(800);
@@ -56,4 +71,4 @@ async function waitForManualLogin(page, opts = {}) {
   throw new Error('Timeout aguardando login SSO manual (15 min). Clique em "Já fiz login" no Studio após autenticar.');
 }
 
-module.exports = { waitForManualLogin, clearSsoMarker, signalSsoContinue, MARKER, isLoggedIn };
+module.exports = { waitForManualLogin, clearSsoMarker, signalSsoContinue, MARKER, STATE_PATH, saveState, isLoggedIn };

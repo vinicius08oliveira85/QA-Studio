@@ -1,10 +1,13 @@
-function buildGeneratePrompt(ctx) {
+function buildGeneratePrompt(ctx, opts = {}) {
   const steps = (ctx.steps || [])
     .map((s) => `${s.order}. ACTION: ${s.action}\n   EXPECTED: ${s.expected}`)
     .join('\n');
   const mass = (ctx.mass || [])
     .map((m) => `- ${m.name}: ${m.data}${m.purpose ? ` (${m.purpose})` : ''}`)
     .join('\n') || '(nenhuma)';
+  const fixHint = opts.fixHint
+    ? `\n=== FIX REQUEST (a versão anterior não compilou) ===\n${opts.fixHint.slice(0, 2000)}\nCorrija o TypeScript e reenvie o arquivo completo.\n`
+    : '';
 
   return `You are a senior QA automation engineer. Generate a single Playwright test file (@playwright/test) for an EXTERNAL web app.
 
@@ -19,24 +22,26 @@ ${steps || '(no steps)'}
 
 === TEST DATA (mass) ===
 ${mass}
-
+${fixHint}
 === OUTPUT RULES ===
 1. Reply with ONE TypeScript code fence only (language typescript). No prose outside the fence.
 2. Use import { test, expect } from '@playwright/test';
 3. Also: import { waitForManualLogin } from '../helpers/ssoWait';
 4. test.describe('${ctx.code}', ...) with one test('${ctx.title.replace(/'/g, "\\'")}', async ({ page }) => { ... }).
-5. Start from baseURL (page.goto the URL in step 1 action if present).
-6. After the first navigation, call await waitForManualLogin(page, { force: true }) once for SSO. Do NOT call it again later if already logged in.
-7. After login, assert session with resilient checks (e.g. button "Sair", navigation visible, OR url matching /dashboard|/agendas|/atendimento) — never require a single exact path.
-8. Interpret hierarchical step paths like "A / B > C > D > E" literally left-to-right:
+5. Navigate with RELATIVE paths only: await page.goto('/...') (page.goto('/') for the root). NEVER hardcode an absolute origin (http://...). baseURL is already set in the Playwright config from TARGET_BASE_URL.
+6. Wrap the actions of each step N in: await test.step('Passo N — <short title>', async () => { ... });
+7. After the first navigation, call await waitForManualLogin(page, { force: true }) once for SSO. Do NOT call it again later if already logged in.
+8. After login, assert session with resilient checks (e.g. button "Sair", navigation visible, OR url matching /dashboard|/agendas|/atendimento) — never require a single exact path.
+9. Interpret hierarchical step paths like "A / B > C > D > E" literally left-to-right:
    - First segments may be sidebar/menu (e.g. Atendimento → Ambulatorial).
    - Later segments are often form/combobox context on the page (Clínica, Especialidade, Profissional). Look for labeled comboboxes/fields and select the EXACT intended option.
    - CRITICAL disambiguation: "LEVE CLINICA TIJUCA" is NOT "LEVE CLINICA BARRA DA TIJUCA". Reject options containing "Barra". Prefer the full label from the step (e.g. "LEVE CLINICA TIJUCA - Rio de Janeiro").
-9. Map each step action to Playwright locators/actions; use massa data where relevant.
-10. After each step N, call: await page.screenshot({ path: 'artifacts/step-${ctx.caseId}-N.png', fullPage: true });
-11. Soft-assert expected outcomes with expect(...). Prefer resilient selectors (role, label, text).
-12. Do NOT hardcode passwords or try to automate SSO credentials.
-13. File must be self-contained and runnable by: npx playwright test
+10. Map each step action to Playwright locators/actions; use massa data where relevant.
+11. After each step N, call: await page.screenshot({ path: 'artifacts/step-${ctx.caseId}-N.png', fullPage: true });
+12. Soft-assert expected outcomes with expect(...). Prefer resilient selectors (role, label, text).
+13. Do NOT hardcode passwords or try to automate SSO credentials.
+14. SYNCHRONIZATION: never use page.waitForTimeout() to wait for app state. Wait with expect(locator).toBeVisible()/toContainText(), expect.poll(...) or test.step(...) with real conditions. The only allowed fixed delays are the per-step screenshots.
+15. File must be self-contained and runnable by: npx playwright test
 `;
 }
 
@@ -75,6 +80,9 @@ function buildJudgePrompt(ctx, runOut) {
     .map((s) => `${s.order}. expected: ${s.expected} | action: ${s.action}`)
     .join('\n');
   const shots = (runOut.screenshots || []).join('\n') || '(none)';
+  const pwErrors = (runOut.reportErrors || []).length
+    ? `\n=== PLAYWRIGHT ERRORS (report.json) ===\n${runOut.reportErrors.join('\n---\n')}\n`
+    : '';
   const apiExtra = runOut.requestResults
     ? `\n=== API REQUEST RESULTS ===\n${JSON.stringify(runOut.requestResults, null, 2).slice(0, 8000)}\n`
     : '';
@@ -91,7 +99,7 @@ ${steps}
 - exitCode: ${runOut.exitCode}
 - stdout/stderr (truncated):
 ${(runOut.log || '').slice(0, 8000)}
-
+${pwErrors}
 === SCREENSHOT PATHS ===
 ${shots}
 ${apiExtra}

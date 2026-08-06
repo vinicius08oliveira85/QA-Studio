@@ -15,7 +15,7 @@ try {
 }
 
 const api = require('./studioApi');
-const { parseArgs } = require('./utils');
+const { parseArgs, checkUrl } = require('./utils');
 const { getAdapter } = require('./agents');
 const { runOneCase, ALLOWED_TYPES } = require('./runCase');
 
@@ -31,6 +31,14 @@ async function main() {
 
   if (!process.env.TARGET_BASE_URL) {
     console.error('Defina TARGET_BASE_URL (app externo sob teste). Veja agent-runner/.env.example');
+    process.exit(2);
+  }
+
+  try {
+    const status = await checkUrl(process.env.TARGET_BASE_URL);
+    console.log(`[agent-runner] Pré-flight: ${process.env.TARGET_BASE_URL} respondeu ${status}`);
+  } catch (err) {
+    console.error(`[agent-runner] Pré-flight falhou — ${process.env.TARGET_BASE_URL} inacessível: ${err.message}`);
     process.exit(2);
   }
 
@@ -88,6 +96,7 @@ async function main() {
   for (const r of results) {
     console.log(`  - ${r.code}: ${r.result}${r.executionId ? ` (exec #${r.executionId})` : ''}`);
   }
+  console.log('[agent-runner] Relatório visual: npx playwright show-report artifacts/html-report');
   process.exit(failed ? 1 : 0);
 }
 

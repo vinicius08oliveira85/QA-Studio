@@ -41,6 +41,8 @@ Os dados ficam no arquivo local `data/qa.db` (SQLite). Uso pessoal, sem login.
 | `QA_API_TIMEOUT_MS` / `QA_API_RETRIES` | agent-runner | `30000` / `0` | Timeout e tentativas do client HTTP do runner |
 | `TARGET_BASE_URL` | agent-runner | — | App/API sob teste (obrigatória na CLI) |
 | `PLAYWRIGHT_TIMEOUT_MS` | agent-runner | `900000` | Timeout do Chromium; encerra o processo se estourar |
+| `PLAYWRIGHT_RETRIES` | agent-runner | `0` | Reexecuta o caso automaticamente em falha (ex.: `1` na CI) |
+| `SSO_STATE_OFF` | agent-runner | — | `1` desliga o reuso de sessão de login entre casos da fila |
 | `ARTIFACT_MAX_BYTES` | agent-runner | `10485760` | Tamanho máximo de artefato persistido em `specs/` |
 
 ## As 5 seções (integradas entre si)
