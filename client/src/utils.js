@@ -6,14 +6,14 @@ export const BADGE_TONES = {
   // âmbar (atenção / em andamento)
   'Média': 'amber', 'Em Andamento': 'amber', 'Em Correção': 'amber', 'Em Homologação': 'amber',
   Pendente: 'amber', Aberto: 'amber', Aberta: 'amber', Sugerido: 'amber', 'Em Desenvolvimento': 'amber',
-  'Em Análise': 'amber',
+  'Em Análise': 'amber', Executando: 'amber',
   // vermelho
   Blocker: 'red', Falhou: 'red', Bloqueado: 'red', 'Alta': 'red', 'Cancelado': 'gray',
   // azul
   'Automatizado': 'blue',
   // cinza
   Baixa: 'gray', Rascunho: 'gray', Rejeitado: 'gray', 'Não Executado': 'gray', Cancelada: 'gray',
-  Arquivo: 'gray', 'Manual': 'gray'
+  Arquivo: 'gray', 'Manual': 'gray', Pulado: 'gray'
 };
 
 export const TASK_STATUS = ['Aberta', 'Em Andamento', 'Em Homologação', 'Concluída', 'Cancelada'];

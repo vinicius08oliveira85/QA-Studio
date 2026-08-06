@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnCmd } = require('../utils');
+const { spawnCmd, treeKill } = require('../utils');
 
 /**
  * OpenCode (provider Google) lê GOOGLE_GENERATIVE_AI_API_KEY.
@@ -35,15 +35,21 @@ async function prompt(text, opts = {}) {
       let stdout = '';
       let stderr = '';
       const timeoutMs = opts.timeoutMs || Number(process.env.AGENT_TIMEOUT_MS) || 600_000;
+      let stream;
+      // No Windows spawnCmd cria um cmd.exe intermediário: matar só ele deixa o
+      // `opencode` neto vivo segurando os pipes e o Node nunca encerra.
       const timer = setTimeout(() => {
-        child.kill('SIGTERM');
+        try { stream?.destroy(); } catch { /* ignore */ }
+        treeKill(child);
         reject(new Error(`OpenCode timeout after ${timeoutMs}ms`));
       }, timeoutMs);
+      timer.unref?.();
 
       child.stdout.on('data', (d) => { stdout += d.toString(); });
       child.stderr.on('data', (d) => { stderr += d.toString(); });
       child.on('error', (err) => {
         clearTimeout(timer);
+        try { stream?.destroy(); } catch { /* ignore */ }
         reject(new Error(`OpenCode failed to start (${bin}): ${err.message}. Is OpenCode installed and on PATH?`));
       });
       child.on('close', (code) => {
@@ -51,7 +57,7 @@ async function prompt(text, opts = {}) {
         resolve({ stdout, stderr, code });
       });
 
-      const stream = fs.createReadStream(tmp);
+      stream = fs.createReadStream(tmp);
       stream.pipe(child.stdin);
       stream.on('error', reject);
     });

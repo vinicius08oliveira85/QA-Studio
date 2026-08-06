@@ -17,6 +17,7 @@ import TestMass from './pages/TestMass.jsx';
 import Execution from './pages/Execution.jsx';
 import Bugs from './pages/Bugs.jsx';
 import Retests from './pages/Retests.jsx';
+import Report from './pages/Report.jsx';
 import Regression from './pages/Regression.jsx';
 import RegressionDetail from './pages/RegressionDetail.jsx';
 import Automations from './pages/Automations.jsx';
@@ -237,6 +238,7 @@ function Shell() {
               <Route path="execucao/api" element={<Execution type="API" />} />
               <Route path="bugs" element={<Bugs />} />
               <Route path="reteste" element={<Retests />} />
+              <Route path="relatorio" element={<Report />} />
             </Route>
 
             <Route path="/regressao" element={<Regression />} />
@@ -252,6 +254,7 @@ function Shell() {
             <Route path="/massa" element={<Navigate to="/tarefas" replace />} />
             <Route path="/bugs" element={<Navigate to="/tarefas" replace />} />
             <Route path="/reteste" element={<Navigate to="/tarefas" replace />} />
+            <Route path="/relatorio" element={<Navigate to="/tarefas" replace />} />
             <Route path="/execucao/*" element={<Navigate to="/tarefas" replace />} />
             <Route path="*" element={<Navigate to="/tarefas" replace />} />
           </Route>

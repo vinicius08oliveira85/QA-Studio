@@ -20,7 +20,12 @@ function getAdapter(name) {
 
 async function generateSpec(ctx, { agentName, cwd, fixHint, specPath } = {}) {
   const { key, adapter } = getAdapter(agentName);
-  const prompt = buildGeneratePrompt(ctx, { fixHint });
+  const prompt = buildGeneratePrompt(ctx, {
+    fixHint,
+    flowMode: ctx.flowMode || 'start',
+    sequentialFlow: !!ctx.sequentialFlow,
+    previousCase: ctx.previousCase || null
+  });
   const raw = await adapter.prompt(prompt, { cwd });
   const code = extractCodeFence(raw, 'typescript') || extractCodeFence(raw, 'ts');
   if (!code || !/test\s*\(/.test(code)) {

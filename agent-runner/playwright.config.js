@@ -26,14 +26,15 @@ module.exports = defineConfig({
   ],
   use: {
     baseURL,
+    // Com QA_FLOW_CDP os specs usam flowFixtures (connectOverCDP) e ignoram launch local.
     headless: process.env.HEADED !== '1',
-    launchOptions: process.env.HEADED === '1' ? { slowMo: 250 } : undefined,
+    launchOptions: process.env.HEADED === '1' && !process.env.QA_FLOW_CDP ? { slowMo: 250 } : undefined,
     screenshot: 'on',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     actionTimeout: 20_000,
     navigationTimeout: 30_000,
-    ...(statePath ? { storageState: statePath } : {})
+    ...(statePath && !process.env.QA_FLOW_CDP ? { storageState: statePath } : {})
   },
   projects: [{ name: 'chromium', use: { channel: undefined, browserName: 'chromium' } }]
 });

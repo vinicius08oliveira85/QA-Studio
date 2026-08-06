@@ -17,7 +17,12 @@ try {
 const api = require('./studioApi');
 const { parseArgs, checkUrl, sleep } = require('./utils');
 const { getAdapter } = require('./agents');
-const { runOneCase, ALLOWED_TYPES } = require('./runCase');
+const { runOneCase, ALLOWED_TYPES, UI_TYPES } = require('./runCase');
+const { runSequentialSuite } = require('./sequentialSuite');
+const { runLiveSuite } = require('./liveSuite');
+const browserSession = require('./browserSession');
+const { clearFixMarkers } = require('../helpers/flowControl');
+const { statePathFor } = require('../helpers/ssoWait');
 
 async function replayFailed() {
   const dir = path.join(ROOT, 'artifacts', 'failed-executions');
@@ -66,7 +71,7 @@ async function main() {
   if (!args.caseId && !args.taskId) {
     console.error('Uso:');
     console.error('  npm run test:agent -- --caseId=<id> [--agent=opencode|cursor] [--headless]');
-    console.error('  npm run test:agent -- --taskId=<id> [--type=Fumaça|Funcional|API] [--all-modes] [--agent=...]');
+    console.error('  npm run test:agent -- --taskId=<id> [--type=Fumaça|Funcional|API] [--all-modes] [--sequential-flow] [--agent=...]');
     console.error('  npm run test:agent -- --replay-failed');
     console.error('  (browser visível por padrão; --headless para CI)');
     process.exit(2);
@@ -87,15 +92,27 @@ async function main() {
 
   const agentName = args.agent || process.env.AGENT || 'opencode';
   const { key: agentKey } = getAdapter(agentName);
+  const sequentialFlow = !!args.sequentialFlow;
+
+  // Continuidade de tela exige browser visível e um Chromium vivo.
+  if (sequentialFlow) args.headed = true;
 
   console.log(`[agent-runner] API=${api.BASE}`);
   console.log(`[agent-runner] TARGET=${process.env.TARGET_BASE_URL}`);
   console.log(`[agent-runner] AGENT=${agentKey}`);
   console.log(`[agent-runner] BROWSER=${args.headed ? 'headed (visível)' : 'headless'}`);
+  // Agent sequencial: modo live (MCP no CDP) por padrão; LIVE_SUITE=0 volta à geração de specs.
+  const liveSuite = sequentialFlow && process.env.LIVE_SUITE !== '0';
+  if (sequentialFlow) {
+    console.log(liveSuite
+      ? '[agent-runner] FLOW=live (OpenCode + Playwright MCP no mesmo Chromium)'
+      : '[agent-runner] FLOW=sequential (suíte Playwright gerada em lote)');
+  }
 
   fs.mkdirSync(path.join(ROOT, 'artifacts'), { recursive: true });
   fs.mkdirSync(path.join(ROOT, '.generated'), { recursive: true });
   fs.mkdirSync(path.join(ROOT, 'specs'), { recursive: true });
+  clearFixMarkers();
 
   let caseIds = [];
   if (args.caseId) {
@@ -106,50 +123,88 @@ async function main() {
       type: args.type || undefined,
       executionMode: args.automatedOnly ? 'Automatizado' : undefined
     });
+    const eligibleTypes = sequentialFlow ? UI_TYPES : ALLOWED_TYPES;
     caseIds = list
-      .filter((c) => ALLOWED_TYPES.has(c.type))
+      .filter((c) => eligibleTypes.has(c.type))
       .filter((c) => !args.type || c.type === args.type)
       .map((c) => c.id);
     console.log(`[agent-runner] Fila tarefa ${args.taskId}: ${caseIds.length} caso(s)${args.automatedOnly ? ' Automatizado' : ''}`);
     if (!caseIds.length) {
-      console.error('Nenhum caso elegível na fila (tipo Fumaça/Funcional/API' + (args.automatedOnly ? ' + Automatizado' : '') + ').');
+      const types = sequentialFlow ? 'Fumaça/Funcional' : 'Fumaça/Funcional/API';
+      console.error(`Nenhum caso elegível na fila (tipo ${types}${args.automatedOnly ? ' + Automatizado' : ''}).`);
       process.exit(2);
     }
   }
 
-  const results = [];
-  const caseRetries = Number(process.env.CASE_RETRIES || 1);
-
-  for (const id of caseIds) {
-    let last = null;
-    for (let attempt = 0; attempt <= caseRetries; attempt++) {
-      if (attempt > 0) {
-        await sleep(2000 * attempt);
-        console.log(`[agent-runner] Retentando caso ${id} (tentativa ${attempt + 1}/${caseRetries + 1})...`);
-      }
-      try {
-        const r = await runOneCase(id, {
-          root: ROOT,
-          agentName: agentKey,
-          headed: args.headed,
-          reuseSpec: args.reuseSpec,
-          skipJudge: args.skipJudge
-        });
-        last = r;
-        // Só infra (Bloqueado) é retryável; veredito Falhou/Passou é definitivo.
-        if (r.result !== 'Bloqueado' || attempt >= caseRetries) break;
-        console.warn(`[agent-runner] Caso ${id} Bloqueado por infraestrutura — retry...`);
-      } catch (err) {
-        console.error(`[agent-runner] Caso ${id} erro de infra:`, err.message);
-        last = { ok: false, result: 'Bloqueado', code: String(id), error: err.message };
-        if (attempt >= caseRetries) break;
-      }
-    }
-    results.push(last);
+  if (sequentialFlow) {
+    const statePath = statePathFor(process.env.TARGET_BASE_URL);
+    await browserSession.start({
+      headed: true,
+      statePath,
+      baseURL: process.env.TARGET_BASE_URL
+    });
   }
 
-  const failed = results.filter((r) => !r.ok).length;
-  console.log(`[agent-runner] Concluído: ${results.length - failed}/${results.length} Passou`);
+  const results = [];
+  const caseRetries = sequentialFlow ? 0 : Number(process.env.CASE_RETRIES || 1);
+  if (sequentialFlow) {
+    try {
+      const suite = liveSuite
+        ? await runLiveSuite({
+          root: ROOT,
+          caseIds,
+          agentName: 'opencode-live',
+          baseURL: process.env.TARGET_BASE_URL
+        })
+        : await runSequentialSuite({
+          root: ROOT,
+          caseIds,
+          agentName: agentKey,
+          skipJudge: args.skipJudge,
+          baseURL: process.env.TARGET_BASE_URL
+        });
+      for (const item of suite.results) {
+        results.push({
+          ...item,
+          ok: item.result === 'Passou',
+          skipped: item.result === 'Não Executado'
+        });
+      }
+    } finally {
+      await browserSession.stop();
+      clearFixMarkers();
+    }
+  } else {
+    for (const id of caseIds) {
+      let last = null;
+      for (let attempt = 0; attempt <= caseRetries; attempt++) {
+        if (attempt > 0) {
+          await sleep(2000 * attempt);
+          console.log(`[agent-runner] Retentando caso ${id} (tentativa ${attempt + 1}/${caseRetries + 1})...`);
+        }
+        try {
+          last = await runOneCase(id, {
+            root: ROOT,
+            agentName: agentKey,
+            headed: args.headed,
+            reuseSpec: args.reuseSpec,
+            skipJudge: args.skipJudge
+          });
+          if (last.result !== 'Bloqueado' || attempt >= caseRetries) break;
+          console.warn(`[agent-runner] Caso ${id} Bloqueado por infraestrutura — retry...`);
+        } catch (err) {
+          console.error(`[agent-runner] Caso ${id} erro de infra:`, err.message);
+          last = { ok: false, result: 'Bloqueado', code: String(id), error: err.message };
+          if (attempt >= caseRetries) break;
+        }
+      }
+      results.push(last);
+    }
+  }
+
+  const failed = results.filter((r) => ['Falhou', 'Bloqueado'].includes(r?.result)).length;
+  const skipped = results.filter((r) => r?.skipped || r?.result === 'Não Executado').length;
+  console.log(`[agent-runner] Concluído: ${results.filter((r) => r?.ok).length}/${results.length} Passou` + (skipped ? ` (${skipped} pulado(s))` : ''));
   for (const r of results) {
     const t = r.timings;
     const dur = t ? ` (total ${fmtMs(t.totalMs)}: api ${fmtMs(t.apiMs)} / spec ${fmtMs(t.specMs)} / run ${fmtMs(t.runMs)} / judge ${fmtMs(t.judgeMs)})` : '';
@@ -164,16 +219,19 @@ async function main() {
     agent: agentKey,
     baseURL: process.env.TARGET_BASE_URL,
     api: api.BASE,
+    sequentialFlow,
+    liveSuite: sequentialFlow && process.env.LIVE_SUITE !== '0',
     caseRetries,
-    passed: results.length - failed,
+    passed: results.filter((r) => r?.ok).length,
     failed,
+    skipped,
     results
   };
   fs.writeFileSync(path.join(ROOT, 'artifacts', 'results.json'), JSON.stringify(summary, null, 2), 'utf8');
   const bundles = results.map((r) => r.evidenceDir).filter(Boolean);
   fs.writeFileSync(
     path.join(ROOT, 'artifacts', 'last-run.json'),
-    JSON.stringify({ ranAt: summary.ranAt, bundles, passed: summary.passed, failed: summary.failed }, null, 2),
+    JSON.stringify({ ranAt: summary.ranAt, bundles, passed: summary.passed, failed: summary.failed, sequentialFlow }, null, 2),
     'utf8'
   );
   console.log(`[agent-runner] Resumo: artifacts/results.json${bundles.length ? ` · bundles em last-run.json` : ''}`);
@@ -181,7 +239,8 @@ async function main() {
   process.exitCode = failed ? 1 : 0;
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
+  try { await browserSession.stop(); } catch { /* ok */ }
   process.exit(1);
 });

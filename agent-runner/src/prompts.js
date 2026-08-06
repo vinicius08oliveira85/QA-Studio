@@ -6,8 +6,51 @@ function buildGeneratePrompt(ctx, opts = {}) {
     .map((m) => `- ${m.name}: ${m.data}${m.purpose ? ` (${m.purpose})` : ''}`)
     .join('\n') || '(nenhuma)';
   const fixHint = opts.fixHint
-    ? `\n=== FIX REQUEST (a versão anterior não compilou) ===\n${opts.fixHint.slice(0, 2000)}\nCorrija o TypeScript e reenvie o arquivo completo.\n`
+    ? `\n=== FIX REQUEST (a versão anterior não compilou / falhou na execução) ===\n${opts.fixHint.slice(0, 2000)}\nCorrija o TypeScript e reenvie o arquivo completo.\n`
     : '';
+
+  const flowMode = opts.flowMode || ctx.flowMode || 'start';
+  const sequential = !!(opts.sequentialFlow || ctx.sequentialFlow);
+  const prev = opts.previousCase || ctx.previousCase;
+
+  const importBlock = sequential
+    ? `2. Use: import { test, expect } from '../helpers/flowFixtures';
+   (NÃO use '@playwright/test' direto — a fila reutiliza o mesmo browser via CDP.)
+3. Also: import { waitForManualLogin } from '../helpers/ssoWait'; — ONLY in start mode.`
+    : `2. Use import { test, expect } from '@playwright/test';
+3. Also: import { waitForManualLogin } from '../helpers/ssoWait';`;
+
+  let modeBlock;
+  if (flowMode === 'continue') {
+    const prevBlock = prev
+      ? `
+=== PREVIOUS CASE (screen you inherit — DO NOT reset) ===
+- Case: ${prev.code || ''} — ${prev.title || ''}
+- Last step summary: ${prev.lastStep || '(unknown)'}
+- Expected URL/screen hint: ${prev.expectedUrl || prev.screenHint || '(same app session)'}
+`
+      : '\n=== PREVIOUS CASE ===\n(Continue from whatever screen the prior case left open.)\n';
+
+    modeBlock = `
+=== FLOW MODE: continue ===
+You are continuing a sequential queue on an ALREADY OPEN browser session (same page).
+${prevBlock}
+CONTINUE RULES (mandatory):
+- Import test/expect from '../helpers/flowFixtures' ONLY.
+- Do NOT call page.goto('/') or page.goto with only '/'.
+- Do NOT call waitForManualLogin or click "Entrar com Microsoft" / start a new SSO.
+- At the START of the test, assert the current screen matches the expected starting context (e.g. patient chart open). If it does not, fail immediately with:
+  throw new Error('FLOW_CONTEXT_LOST: ' + <short reason>);
+- Then execute ONLY this case's steps from the inherited screen.
+- Prefer relative navigations inside the already-open app only when the step requires it (never restart login).
+`;
+  } else {
+    modeBlock = `
+=== FLOW MODE: start ===
+Start from a clean entry: navigate with page.goto('/') then Microsoft SSO via waitForManualLogin.
+${sequential ? `- Import test/expect from '../helpers/flowFixtures' (shared browser for the queue).\n` : ''}
+`;
+  }
 
   return `You are a senior QA automation engineer. Generate a single Playwright test file (@playwright/test) for an EXTERNAL web app.
 
@@ -16,7 +59,7 @@ function buildGeneratePrompt(ctx, opts = {}) {
 - Case: ${ctx.code} — ${ctx.title}
 - Type: ${ctx.type}
 - Preconditions: ${ctx.preconditions || '(none)'}
-
+${modeBlock}
 === STEPS (follow in order; use page.screenshot after each step) ===
 ${steps || '(no steps)'}
 
@@ -25,14 +68,16 @@ ${mass}
 ${fixHint}
 === OUTPUT RULES ===
 1. Reply with ONE TypeScript code fence only (language typescript). No prose outside the fence.
-2. Use import { test, expect } from '@playwright/test';
-3. Also: import { waitForManualLogin } from '../helpers/ssoWait';
+${importBlock}
 4. test.describe('${ctx.code}', ...) with one test('${ctx.title.replace(/'/g, "\\'")}', async ({ page }) => { ... }).
-5. Navigate with RELATIVE paths only: await page.goto('/...') (page.goto('/') for the root). NEVER hardcode an absolute origin (http://...). baseURL is already set in the Playwright config from TARGET_BASE_URL.
+5. Navigate with RELATIVE paths only: await page.goto('/...') when navigation is allowed by flow mode. NEVER hardcode an absolute origin (http://...). baseURL is already set in the Playwright config from TARGET_BASE_URL.
 6. Wrap the actions of each step N in: await test.step('Passo N — <short title>', async () => { ... });
-7. After the first navigation, call await waitForManualLogin(page, { force: true }) once for SSO. Do NOT call it again later if already logged in.
+${flowMode === 'continue'
+    ? `7. Do NOT call waitForManualLogin. Assert inherited screen first; throw FLOW_CONTEXT_LOST if wrong.
+8. Soft-assert expected outcomes with expect(...). Prefer resilient selectors (role, label, text).`
+    : `7. After the first navigation, call await waitForManualLogin(page, { force: true }) once for SSO. Do NOT call it again later if already logged in.
 7b. Microsoft / corporate SSO: the landing page often shows only "Entrar com Microsoft" (NO input[type=email] / password). Assert that button (or an already-logged-in signal like "Sair"), click it if present, then waitForManualLogin. NEVER require email/password fields on the first screen unless they are actually visible.
-8. After login, assert session with resilient checks (e.g. button "Sair", navigation visible, OR url matching /dashboard|/agendas|/atendimento) — never require a single exact path.
+8. After login, assert session with resilient checks (e.g. button "Sair", navigation visible, OR url matching /dashboard|/agendas|/atendimento) — never require a single exact path.`}
 9. Interpret hierarchical step paths like "A / B > C > D > E" literally left-to-right:
    - First segments may be sidebar/menu (e.g. Atendimento → Ambulatorial).
    - Later segments are often form/combobox context on the page (Clínica, Especialidade, Profissional). Look for labeled comboboxes/fields and select the EXACT intended option.
@@ -40,7 +85,7 @@ ${fixHint}
 10. Map each step action to Playwright locators/actions; use massa data where relevant.
 11. After each step N, call: await page.screenshot({ path: 'artifacts/step-${ctx.caseId}-N.png', fullPage: true });
 12. Soft-assert expected outcomes with expect(...). Prefer resilient selectors (role, label, text).
-13. Do NOT hardcode passwords or try to automate SSO credentials. Even if steps/mass contain a username/password, treat login as manual Microsoft SSO via waitForManualLogin.
+13. Do NOT hardcode passwords or try to automate SSO credentials. Even if steps/mass contain a username/password, treat login as manual Microsoft SSO via waitForManualLogin (start mode only).
 14. SYNCHRONIZATION: never use page.waitForTimeout() to wait for app state. Wait with expect(locator).toBeVisible()/toContainText(), expect.poll(...) or test.step(...) with real conditions. The only allowed fixed delays are the per-step screenshots.
 15. File must be self-contained and runnable by: npx playwright test
 16. SUT ERROR DETECTION: after EVERY navigation/action, if the page shows a system error/empty-state message (patterns: /não foi possível|erro ao|falha ao|ocorreu um erro|não carregou|indisponível|sem dados/i), capture the visible message text and fail immediately with: throw new Error('SUT_ERROR: ' + <texto visível>). Do NOT silently work around it or keep waiting for data that will never load — the runner treats this as an environment failure.
@@ -129,6 +174,7 @@ Rules:
 - If the run crashed before executing, use result "Bloqueado" and mark steps "Não Executado".
 - If any step failed assertions / non-2xx (for API), overall result "Falhou".
 - Be conservative: unclear evidence → "Falhou" with explanation in actual.
+- If log contains FLOW_CONTEXT_LOST or SUT_ERROR, prefer result "Bloqueado" (environment / flow), not "Falhou".
 `;
 }
 

@@ -12,7 +12,8 @@ const TABS = [
   { to: 'execucao/funcional', label: 'Funcional' },
   { to: 'execucao/api', label: 'API' },
   { to: 'bugs', label: 'Bugs' },
-  { to: 'reteste', label: 'Reteste' }
+  { to: 'reteste', label: 'Reteste' },
+  { to: 'relatorio', label: 'Relatório' }
 ];
 
 export default function TaskTabs({ taskId }) {

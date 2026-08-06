@@ -3,6 +3,8 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { clearSsoMarker, signalSsoContinue } = require('../../agent-runner/helpers/ssoWait');
+const { signalFixAction, clearFixMarkers, readFixRequest } = require('../../agent-runner/helpers/flowControl');
+const { appendJobOutput, finalizeJobError } = require('../helpers/agentRunEvents');
 
 const ROOT = path.join(__dirname, '..', '..');
 const RUNNER = path.join(ROOT, 'agent-runner');
@@ -21,9 +23,43 @@ function sanitizeLog(log) {
 }
 
 function killJob(job) {
-  if (job.pid) {
-    try { process.kill(job.pid, 'SIGTERM'); } catch { /* processo já encerrado */ }
+  if (!job.pid) return;
+  if (process.platform === 'win32') {
+    // SIGTERM não derruba a árvore (opencode/Chromium) no Windows.
+    try { spawn('taskkill', ['/pid', String(job.pid), '/T', '/F'], { windowsHide: true }); } catch { /* ignore */ }
+    return;
   }
+  try { process.kill(job.pid, 'SIGTERM'); } catch { /* processo já encerrado */ }
+}
+
+function isPidAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/** Job cujo processo morreu sem emitir 'close' não pode bloquear novas execuções. */
+function reapDeadJobs() {
+  for (const job of jobs.values()) {
+    if ((job.status === 'running' || job.status === 'queued') && job.startedAt && !isPidAlive(job.pid)) {
+      clearTimeout(job.timeoutTimer);
+      job.status = 'error';
+      job.phase = 'orphaned';
+      job.error = job.error || 'Processo do runner terminou sem retorno';
+      job.finishedAt = Date.now();
+      job.waitingSso = false;
+      job.waitingFix = false;
+    }
+  }
+}
+
+function activeJob() {
+  reapDeadJobs();
+  return [...jobs.values()].find((j) => j.status === 'running' || j.status === 'queued') || null;
 }
 
 function trimJobs() {
@@ -37,16 +73,7 @@ function trimJobs() {
 }
 
 function appendLog(job, chunk) {
-  job.log += chunk;
-  if (job.log.length > 100_000) job.log = job.log.slice(-80_000);
-  if (/\[SSO\].*Aguardando/i.test(chunk) || /\[SSO\].*login manual/i.test(chunk)) {
-    job.waitingSso = true;
-    job.phase = 'waiting_sso';
-  }
-  if (/\[SSO\].*Continuando|\[SSO\].*Confirmação|\[SSO\].*retomando/i.test(chunk)) {
-    job.waitingSso = false;
-    job.phase = 'running';
-  }
+  appendJobOutput(job, chunk);
 }
 
 function spawnRunner(job, args) {
@@ -54,6 +81,7 @@ function spawnRunner(job, args) {
   job.phase = 'starting';
   job.startedAt = Date.now();
   clearSsoMarker();
+  clearFixMarkers();
   const headed = args.includes('--headed');
   const child = spawn('node', [path.join(RUNNER, 'src', 'cli.js'), ...args], {
     cwd: RUNNER,
@@ -75,35 +103,44 @@ function spawnRunner(job, args) {
       job.error = `Job excedeu o limite de ${Math.round(MAX_JOB_MS / 1000 / 60)} min`;
       job.finishedAt = Date.now();
       job.waitingSso = false;
+      job.waitingFix = false;
       clearSsoMarker();
+      clearFixMarkers();
     }
   }, MAX_JOB_MS);
   job.timeoutTimer.unref?.();
 
-  child.stdout.on('data', (d) => appendLog(job, d.toString()));
+  child.stdout.on('data', (d) => appendJobOutput(job, d.toString(), { parseStructured: true }));
   child.stderr.on('data', (d) => appendLog(job, d.toString()));
   child.on('error', (err) => {
     clearTimeout(job.timeoutTimer);
     job.status = 'error';
-    job.phase = 'error';
-    job.error = err.message;
     job.finishedAt = Date.now();
     job.waitingSso = false;
+    job.waitingFix = false;
+    job.error = err.message;
+    finalizeJobError(job, 1);
+    clearFixMarkers();
   });
   child.on('close', (code) => {
     clearTimeout(job.timeoutTimer);
     job.exitCode = code ?? 1;
     job.status = code === 0 ? 'done' : 'error';
-    job.phase = job.status;
     job.finishedAt = Date.now();
     job.waitingSso = false;
-    if (code !== 0 && !job.error) job.error = `Runner exit ${code}`;
+    job.waitingFix = false;
+    if (code === 0) {
+      job.phase = job.queueStopped ? 'stopped_after_fail' : 'done';
+    } else {
+      finalizeJobError(job, code ?? 1);
+    }
     clearSsoMarker();
+    clearFixMarkers();
   });
 }
 
 /** Campos não serializáveis do job (handles/objetos circulares) — nunca expor via JSON. */
-const NON_SERIALIZABLE = new Set(['timeoutTimer']);
+const NON_SERIALIZABLE = new Set(['timeoutTimer', 'eventBuffer']);
 
 function publicJob(job) {
   const out = {};
@@ -117,6 +154,7 @@ module.exports = (db) => {
   const router = express.Router();
 
   router.get('/', (req, res) => {
+    reapDeadJobs();
     const list = [...jobs.values()]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, 30)
@@ -125,8 +163,18 @@ module.exports = (db) => {
   });
 
   router.get('/:id', (req, res) => {
+    reapDeadJobs();
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+    // Atualiza fixPrompt a partir do arquivo se ainda aguardando.
+    if (job.waitingFix) {
+      const reqFix = readFixRequest();
+      if (reqFix) {
+        job.fixPrompt = reqFix.error || job.fixPrompt;
+        job.currentCaseId = reqFix.caseId || job.currentCaseId;
+        job.currentCaseCode = reqFix.code || job.currentCaseCode;
+      }
+    }
     res.json({ ...publicJob(job), log: sanitizeLog(job.log) });
   });
 
@@ -144,8 +192,52 @@ module.exports = (db) => {
     res.json({ ok: true, id: job.id, message: 'Sinal de continuar enviado' });
   });
 
+  /** Encerra a execução em andamento (runner + árvore de processos) e libera a fila. */
+  router.post('/:id/cancel', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+    if (job.status !== 'running' && job.status !== 'queued') {
+      return res.json({ ok: true, id: job.id, message: 'Job já estava encerrado' });
+    }
+    killJob(job);
+    clearTimeout(job.timeoutTimer);
+    job.status = 'error';
+    job.phase = 'cancelled';
+    job.error = 'Execução cancelada pelo usuário';
+    job.finishedAt = Date.now();
+    job.waitingSso = false;
+    job.waitingFix = false;
+    clearSsoMarker();
+    clearFixMarkers();
+    appendLog(job, '[Studio] Execução cancelada pelo usuário.\n');
+    res.json({ ok: true, id: job.id, message: 'Execução cancelada' });
+  });
+
+  /** Fila sequencial: Regenerar | Pular | Parar após imprevisto. */
+  router.post('/:id/fix', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+    if (job.status !== 'running' && job.status !== 'queued') {
+      return res.status(400).json({ error: 'Job não está em execução' });
+    }
+    const action = String((req.body || {}).action || '').trim().toLowerCase();
+    if (!['regen', 'skip', 'stop'].includes(action)) {
+      return res.status(400).json({ error: 'action deve ser regen, skip ou stop' });
+    }
+    try {
+      signalFixAction(action);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    job.waitingFix = false;
+    job.phase = action === 'stop' ? 'stopping' : 'running';
+    job.lastFixAction = action;
+    appendLog(job, `[Studio] Ação de correção da fila: ${action}\n`);
+    res.json({ ok: true, id: job.id, action, message: `Ação ${action} enviada ao runner` });
+  });
+
   router.post('/', (req, res) => {
-    const { caseId, taskId, type, agent, headed, allModes, projectId } = req.body || {};
+    const { caseId, taskId, type, agent, headed, allModes, projectId, sequentialFlow } = req.body || {};
     if (!caseId && !taskId) {
       return res.status(400).json({ error: 'Informe caseId ou taskId' });
     }
@@ -179,26 +271,43 @@ module.exports = (db) => {
       return res.status(400).json({ error: `Agente inválido: ${agentKey}` });
     }
 
-    const running = [...jobs.values()].some((j) => j.status === 'running' || j.status === 'queued');
+    const running = activeJob();
     if (running) {
-      return res.status(409).json({ error: 'Já existe uma execução com agent em andamento. Aguarde.' });
+      return res.status(409).json({
+        error: 'Já existe uma execução com agent em andamento. Aguarde ou cancele a execução atual.',
+        runningJobId: running.id,
+        runningPhase: running.phase
+      });
     }
 
     const id = crypto.randomBytes(8).toString('hex');
-    const useHeaded = headed !== false;
+    const useSequential = !!sequentialFlow;
+    // Fluxo sequencial sempre headed (continuidade de tela).
+    const useHeaded = useSequential ? true : headed !== false;
     const args = [];
     if (caseId) args.push(`--caseId=${caseId}`);
     if (taskId) args.push(`--taskId=${taskId}`);
     if (type) args.push(`--type=${type}`);
     args.push(`--agent=${agentKey}`);
     args.push(useHeaded ? '--headed' : '--headless');
-    if (allModes) args.push('--all-modes');
+    if (allModes || useSequential) args.push('--all-modes');
+    if (useSequential) args.push('--sequential-flow');
 
     const job = {
       id,
       status: 'queued',
       phase: 'queued',
       waitingSso: false,
+      waitingFix: false,
+      fixPrompt: null,
+      currentCaseId: null,
+      currentCaseCode: null,
+      lastFixAction: null,
+      sequentialFlow: useSequential,
+      queueStopped: false,
+      items: [],
+      summary: null,
+      eventBuffer: '',
       caseId: caseId || null,
       taskId: taskId || null,
       type: type || null,
@@ -217,7 +326,15 @@ module.exports = (db) => {
     trimJobs();
 
     setImmediate(() => spawnRunner(job, args));
-    res.status(201).json({ id, status: job.status, phase: job.phase, message: 'Agent run iniciado' });
+    res.status(201).json({
+      id,
+      status: job.status,
+      phase: job.phase,
+      sequentialFlow: useSequential,
+      message: useSequential
+        ? 'Suíte contínua em lote iniciada (uma geração, um browser, mesma tela)'
+        : 'Agent run iniciado'
+    });
   });
 
   return router;
@@ -227,4 +344,5 @@ module.exports.killAll = () => {
   for (const job of jobs.values()) {
     if (job.status === 'running' || job.status === 'queued') killJob(job);
   }
+  clearFixMarkers();
 };

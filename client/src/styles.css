@@ -312,10 +312,19 @@ table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 }
 .agent-bubble.agent { background: #eef5ff; border-color: #c9ddf8; align-self: flex-start; }
 .agent-bubble.sso { background: #fff6e8; border-color: #f0d2a0; align-self: flex-start; font-weight: 600; }
+.agent-bubble.flow { background: #f3eef8; border-color: #d4c4e8; align-self: flex-start; }
 .agent-bubble.user { background: #e8f7ee; border-color: #b9e0c8; align-self: flex-end; }
 .agent-bubble.err { background: #fdeeee; border-color: #f0c0c0; }
 .agent-bubble.ok { background: #eefaf0; border-color: #bfe5c6; }
 .agent-bubble.sys { background: transparent; border-style: dashed; color: var(--muted); }
+.agent-suite-progress { padding: 9px 12px; border-bottom: 1px solid var(--border); background: #fff; }
+.agent-suite-summary { margin-bottom: 7px; }
+.agent-suite-items { display: flex; flex-direction: column; gap: 5px; max-height: 145px; overflow-y: auto; }
+.agent-suite-item {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px;
+}
+.agent-suite-error { color: #991b1b; margin-top: 3px; white-space: pre-wrap; }
 
 /* Collapse */
 .collapse { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; overflow: hidden; background: #fff; }
@@ -364,6 +373,23 @@ table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
 .toolbar { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
 .toolbar .input { max-width: 280px; }
+
+/* Relatório */
+.card-sub { color: var(--muted); font-size: 10px; margin-top: 1px; }
+.report-cards .card .num { font-size: 17px; }
+.print-only { display: none; }
+.report .panel { break-inside: avoid; }
+
+@media print {
+  .sidebar, .task-tabs, .page-actions, .no-print { display: none !important; }
+  .layout { display: block; }
+  .content { padding: 0; }
+  .print-only { display: block; }
+  .print-only.report-print-head { margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #333; }
+  .print-only.report-print-head h1 { margin: 0 0 4px; font-size: 18px; }
+  .panel { box-shadow: none; border: 1px solid #ccc; }
+  .cards { grid-template-columns: repeat(6, 1fr); }
+}
 
 @media (max-width: 900px) {
   .sidebar { width: 180px; min-width: 180px; }

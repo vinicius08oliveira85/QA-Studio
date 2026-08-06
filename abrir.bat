@@ -22,6 +22,20 @@ if errorlevel 1 (
 for /f "tokens=*" %%v in ('node -v') do set NODE_VER=%%v
 echo [ok] Node %NODE_VER%
 
+:: --- Este .bat precisa estar na raiz do projeto ---
+if not exist "package.json" (
+  echo.
+  echo [ERRO] Este script nao esta na pasta do QA Studio.
+  echo        Pasta atual: %CD%
+  echo.
+  echo Nao copie o abrir.bat para a Area de Trabalho: ele roda sempre
+  echo na pasta onde esta salvo. Use o abrir.bat que fica na raiz do
+  echo projeto, ou crie um ATALHO para ele ^(botao direito ^> Enviar para
+  echo ^> Area de Trabalho^).
+  pause
+  exit /b 1
+)
+
 :: --- .env ---
 if not exist ".env" (
   if exist ".env.example" (

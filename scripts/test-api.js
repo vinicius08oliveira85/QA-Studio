@@ -113,6 +113,14 @@ function assert(cond, label) {
   const dash = await get('/dashboard?projectId=' + pid);
   assert(dash.totalCases === 4, `dashboard totalCases=4 (got ${dash.totalCases})`);
 
+  console.log('12b. Relatório da tarefa');
+  const report = await get('/reports/task/' + tid);
+  assert(report.summary.totalCases === 4, `relatório totalCases=4 (got ${report.summary.totalCases})`);
+  assert(report.summary.passed === 1 && report.summary.failed === 1, 'relatório passed=1 failed=1');
+  assert(report.cases.length === 4, 'relatório com 4 casos');
+  const lastTc1 = report.cases.find((c) => c.code === tc1.code);
+  assert(lastTc1.last_execution && lastTc1.last_execution.result === 'Passou', 'última execução do tc1 = Passou');
+
   console.log('13. Detalhe do requisito');
   const reqDetail = await get('/requirements/' + req1.id);
   assert(reqDetail.business_rules.length === 2 && reqDetail.test_cases.length >= 1, 'requisito com regras e casos');

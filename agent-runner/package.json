@@ -7,9 +7,11 @@
   "scripts": {
     "start": "node src/cli.js",
     "test:agent": "node src/cli.js",
+    "test:unit": "node --test src/*.test.js",
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
+    "@playwright/mcp": "^0.0.79",
     "@playwright/test": "^1.51.0",
     "dotenv": "^16.6.1"
   },

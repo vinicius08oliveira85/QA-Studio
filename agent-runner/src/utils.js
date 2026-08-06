@@ -97,7 +97,8 @@ function parseArgs(argv) {
     automatedOnly: true,
     reuseSpec: false,
     skipJudge: false,
-    replayFailed: false
+    replayFailed: false,
+    sequentialFlow: false
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -107,8 +108,9 @@ function parseArgs(argv) {
     else if (a === '--skipJudge') out.skipJudge = true;
     else if (a === '--replay-failed') out.replayFailed = true;
     else if (a === '--all-modes') out.automatedOnly = false;
-    else if (a.startsWith('--caseId=')) out.caseId = Number(a.slice('--caseId='.length));
-    else if (a === '--caseId') out.caseId = Number(argv[++i]);
+    else if (a === '--sequential-flow') out.sequentialFlow = true;
+else if (a.startsWith('--caseId=')) out.caseId = a.slice('--caseId='.length);
+else if (a === '--caseId') out.caseId = argv[++i];
     else if (a.startsWith('--taskId=')) out.taskId = Number(a.slice('--taskId='.length));
     else if (a === '--taskId') out.taskId = Number(argv[++i]);
     else if (a.startsWith('--type=')) out.type = a.slice('--type='.length);

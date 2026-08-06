@@ -31,6 +31,7 @@ export default function Execution({ type }) {
   const [execBusy, setExecBusy] = useState(false);
   const [bugBusy, setBugBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [blockedBy, setBlockedBy] = useState(null);
   const [error, setError] = useState('');
   const pollTimer = React.useRef(null);
 
@@ -75,9 +76,18 @@ export default function Execution({ type }) {
         setAgentBusy(false);
         refresh();
         refreshExecs();
-      } catch {
+      } catch (err) {
+        // Rate limit / rede transitória: não matar o job na UI.
+        if (err.status === 429 || err.status === 502 || err.status === 503) {
+          pollTimer.current = setTimeout(tick, 3000);
+          return;
+        }
         setAgentBusy(false);
-        setAgentJob((j) => j ? { ...j, status: 'error', error: 'Falha ao consultar status' } : j);
+        setAgentJob((j) => j ? {
+          ...j,
+          status: 'error',
+          error: err.message || 'Falha ao consultar status'
+        } : j);
       }
     };
     pollTimer.current = setTimeout(tick, 800);
@@ -88,13 +98,31 @@ export default function Execution({ type }) {
     setAgentBusy(true);
     setAgentJob(null);
     setChatOpen(true);
+    setBlockedBy(null);
     try {
       const job = await api.post('/agent-runs', body);
       setAgentJob(job);
       pollAgentJob(job.id);
     } catch (err) {
       setAgentBusy(false);
+      if (err.status === 409 && err.body?.runningJobId) {
+        setBlockedBy({ jobId: err.body.runningJobId, phase: err.body.runningPhase, retry: body });
+      }
       setAgentJob({ status: 'error', error: err.message || 'Falha ao iniciar agent', log: err.message });
+    }
+  };
+
+  /** Libera a fila quando um runner anterior ficou preso (409 permanente). */
+  const cancelBlockingJob = async () => {
+    if (!blockedBy?.jobId) return;
+    const retry = blockedBy.retry;
+    try {
+      await api.post(`/agent-runs/${blockedBy.jobId}/cancel`, {});
+      setBlockedBy(null);
+      setAgentJob(null);
+      if (retry) await startAgent(retry);
+    } catch (err) {
+      setError(err.message || 'Falha ao cancelar a execução em andamento.');
     }
   };
 
@@ -111,6 +139,24 @@ export default function Execution({ type }) {
       setAgentJob((j) => j ? {
         ...j,
         log: (j.log || '') + `[Studio] Erro ao continuar: ${err.message}\n`
+      } : j);
+    }
+  };
+
+  const sendFixAction = async (action) => {
+    if (!agentJob?.id) return;
+    try {
+      await api.post(`/agent-runs/${agentJob.id}/fix`, { action });
+      setAgentJob((j) => j ? {
+        ...j,
+        waitingFix: false,
+        lastFixAction: action,
+        log: (j.log || '') + `[Studio] Ação de correção: ${action}\n`
+      } : j);
+    } catch (err) {
+      setAgentJob((j) => j ? {
+        ...j,
+        log: (j.log || '') + `[Studio] Erro ao enviar correção: ${err.message}\n`
       } : j);
     }
   };
@@ -202,24 +248,58 @@ export default function Execution({ type }) {
           <div className="row-actions">
             <div className="muted small">{cases.length} caso(s)</div>
             {canAgent && (
-              <Btn
-                className="small"
-                disabled={agentBusy || automatedCount === 0}
-                title={automatedCount === 0 ? 'Nenhum caso Automatizado nesta aba' : 'Fila agent dos casos Automatizado'}
-                onClick={() => startAgent({ projectId: current.id, taskId: Number(taskId), type, headed: true })}
-              >
-                {agentBusy ? 'Agent…' : `Agent (${automatedCount})`}
-              </Btn>
+              <>
+                <Btn
+                  className="small"
+                  disabled={agentBusy || automatedCount === 0}
+                  title={automatedCount === 0 ? 'Nenhum caso Automatizado nesta aba' : 'Fila agent dos casos Automatizado'}
+                  onClick={() => startAgent({ projectId: current.id, taskId: Number(taskId), type, headed: true })}
+                >
+                  {agentBusy ? 'Agent…' : `Agent (${automatedCount})`}
+                </Btn>
+                <Btn
+                  className="ghost small"
+                  disabled={agentBusy || cases.length === 0}
+                  title="Agent ao vivo: OpenCode navega o Chromium (snapshot/click) na mesma sessão CDP. Inclui casos Manual."
+                  onClick={() => startAgent({
+                    projectId: current.id,
+                    taskId: Number(taskId),
+                    type,
+                    headed: true,
+                    allModes: true,
+                    sequentialFlow: true
+                  })}
+                >
+                  {agentBusy ? 'Agent…' : `Agent ao vivo (${cases.length})`}
+                </Btn>
+              </>
             )}
           </div>
         }
       />
+
+      {blockedBy && (
+        <div className="panel mb highlight" role="alert">
+          <div style={{ marginBottom: 8 }}>
+            <strong>Execução anterior ainda em andamento</strong>
+            <span className="muted small"> · job {blockedBy.jobId}{blockedBy.phase ? ` (${blockedBy.phase})` : ''}</span>
+          </div>
+          <div className="small" style={{ marginBottom: 10 }}>
+            O agent só roda uma execução por vez. Se o runner anterior travou, cancele para liberar a fila.
+          </div>
+          <div className="row-actions">
+            <Btn className="danger small" onClick={cancelBlockingJob}>Cancelar e tentar de novo</Btn>
+            <Btn className="ghost small" onClick={() => setBlockedBy(null)}>Fechar</Btn>
+          </div>
+        </div>
+      )}
 
       {chatOpen && agentJob && (
         <AgentChat
           job={agentJob}
           busy={agentBusy}
           onContinue={continueSso}
+          onFix={sendFixAction}
           onClose={() => setChatOpen(false)}
         />
       )}

@@ -17,8 +17,15 @@ async function request(path, options = {}) {
   });
   if (!res.ok) {
     let msg = res.statusText;
-    try { msg = (await res.json()).error || msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    let body = null;
+    try {
+      body = await res.json();
+      msg = body.error || msg;
+    } catch { /* ignore */ }
+    const err = new Error(msg);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.json();
 }

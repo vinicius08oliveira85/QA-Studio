@@ -41,7 +41,22 @@ const globalLimiter = rateLimit({
 app.use('/api', globalLimiter);
 
 app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }));
-app.use('/api/agent-runs', rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }));
+// GET (poll do AgentChat ~1/s) precisa de teto alto; POST (spawn) permanece restrito.
+const agentRunsPollLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method !== 'GET'
+});
+const agentRunsWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'GET'
+});
+app.use('/api/agent-runs', agentRunsPollLimiter, agentRunsWriteLimiter);
 
 // CORS opcional para deploys com o client em outra origem (ex.: CORS_ORIGIN=https://qa.exemplo.com)
 const CORS_ORIGIN = process.env.CORS_ORIGIN;
@@ -77,6 +92,7 @@ const routes = {
   '/api/regressions': require('./routes/regressions'),
   '/api/automations': require('./routes/automations'),
   '/api/releases': require('./routes/releases'),
+  '/api/reports': require('./routes/reports'),
   '/api/dashboard': require('./routes/dashboard'),
   '/api/settings': require('./routes/settings'),
   '/api/ai': require('./routes/ai'),

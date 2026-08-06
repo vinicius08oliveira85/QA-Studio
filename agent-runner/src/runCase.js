@@ -5,6 +5,7 @@ const { aggregateResult, spawnCmd, treeKill, sha256, copyDirSync, removeDirSync,
 const { generateSpec, generateApiCollection, judge, getAdapter } = require('./agents');
 const { runPostmanCollection } = require('./postmanRunner');
 const { statePathFor } = require('../helpers/ssoWait');
+const { requestFix, waitForFixAction, clearFixMarkers } = require('../helpers/flowControl');
 
 const UI_TYPES = new Set(['Fumaça', 'Funcional']);
 const API_TYPES = new Set(['API']);
@@ -18,6 +19,8 @@ function specCacheKey(ctx) {
   const payload = {
     type: ctx.type,
     baseURL: ctx.baseURL,
+    flowMode: ctx.flowMode || 'start',
+    sequentialFlow: !!ctx.sequentialFlow,
     preconditions: ctx.preconditions,
     steps: (ctx.steps || []).map((s) => [s.order, s.action, s.expected]),
     mass: (ctx.mass || []).map((m) => [m.name, m.data || '', m.purpose || ''])
@@ -44,6 +47,8 @@ function cleanStaleGenerated(root, ctx) {
 /** Scanner estático: faz valer as regras do prompt no spec gerado (não depende do agent obedecer). */
 function staticSpecViolations(src, ctx) {
   const issues = [];
+  const flowMode = ctx.flowMode || 'start';
+  const sequential = !!ctx.sequentialFlow;
   const waits = (src.match(/\.waitForTimeout\(/g) || []).length;
   if (waits > 0) {
     issues.push(`page.waitForTimeout usado ${waits}x — substituir por expect(...).toBeVisible()/expect.poll(...)`);
@@ -52,10 +57,54 @@ function staticSpecViolations(src, ctx) {
   if (shots < (ctx.steps || []).length) {
     issues.push(`Screenshots por passo ausentes: esperado ${ctx.steps.length}, encontrado ${shots}`);
   }
-  if (!/waitForManualLogin/.test(src)) {
+
+  if (sequential || flowMode === 'continue') {
+    if (!/helpers\/flowFixtures/.test(src)) {
+      issues.push("Fila sequencial: importar { test, expect } de '../helpers/flowFixtures'");
+    }
+  }
+
+  if (flowMode === 'continue') {
+    if (/page\.goto\(\s*['"`]\/['"`]\s*\)/.test(src)) {
+      issues.push("Modo continue: page.goto('/') é proibido — herde a tela aberta");
+    }
+    if (/waitForManualLogin/.test(src)) {
+      issues.push('Modo continue: waitForManualLogin / novo SSO é proibido');
+    }
+    if (!/FLOW_CONTEXT_LOST/.test(src)) {
+      issues.push("Modo continue: deve lançar Error('FLOW_CONTEXT_LOST: ...') se a tela herdada não bater");
+    }
+  } else if (!/waitForManualLogin/.test(src)) {
     issues.push('waitForManualLogin não é chamado após a primeira navegação');
   }
   return issues;
+}
+
+/** Falha técnica / de ambiente (imprevisto), candidata a regenerar spec — não é veredito de negócio. */
+function isUnexpectedFailure(runOut, judgment) {
+  if (detectFlowContextLost(runOut).length) return true;
+  if (detectSutErrors(runOut).length) return true;
+  if (judgment?.result === 'Bloqueado') return true;
+  if (runOut?.infraTimeout) return true;
+  const blob = [runOut?.log || '', ...(runOut?.reportErrors || [])].join('\n');
+  if (runOut?.exitCode !== 0 && /Timeout|locator\.|strict mode|not found|waiting for|Executable doesn't exist/i.test(blob)) {
+    return true;
+  }
+  return false;
+}
+
+function unexpectedHint(runOut, judgment) {
+  const parts = [];
+  const sut = detectSutErrors(runOut);
+  if (sut.length) parts.push('SUT_ERROR: ' + sut.join(' | '));
+  const flow = detectFlowContextLost(runOut);
+  if (flow.length) parts.push('FLOW_CONTEXT_LOST: ' + flow.join(' | '));
+  if (judgment?.actual_result) parts.push(judgment.actual_result);
+  if (!parts.length) {
+    const blob = [...(runOut?.reportErrors || []), runOut?.log || ''].join('\n');
+    if (blob) parts.push(blob.replace(/\s+/g, ' ').slice(0, 800));
+  }
+  return parts.join('\n').slice(0, 1800);
 }
 
 function parseSteps(tc) {
@@ -142,7 +191,7 @@ function validateSpec(root, specPath) {
   });
 }
 
-function runPlaywright(root, specPath, { headed, statePath } = {}) {
+function runPlaywright(root, specPath, { headed, statePath, useFlowCdp } = {}) {
   return new Promise((resolve) => {
     // Pass relative path as an argument so spaces in the repo folder (e.g. "Novo QA") do not break the CLI.
     const relSpec = path.relative(root, specPath).replace(/\\/g, '/');
@@ -155,8 +204,17 @@ function runPlaywright(root, specPath, { headed, statePath } = {}) {
       env.HEADLESS = '1';
     }
 
-    // Reutiliza sessão salva (login SSO manual) entre casos da fila.
-    if (statePath && fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1') env.PLAYWRIGHT_STATE = statePath;
+    // Fila sequencial: conecta no Chromium já aberto (browserSession).
+    if (useFlowCdp) {
+      if (!process.env.QA_FLOW_CDP) {
+        return resolve({ exitCode: 1, log: 'FLOW_CONTEXT_LOST: QA_FLOW_CDP ausente', reportErrors: [] });
+      }
+      env.QA_FLOW_CDP = process.env.QA_FLOW_CDP;
+      delete env.PLAYWRIGHT_STATE; // cookies já estão no context CDP
+    } else if (statePath && fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1') {
+      // Reutiliza sessão salva (login SSO manual) entre casos da fila isolada.
+      env.PLAYWRIGHT_STATE = statePath;
+    }
 
     // Limpa artefatos da execução anterior para não reutilizar evidência/erro obsoleta.
     for (const rel of ['artifacts/report.json', 'artifacts/test-results', 'artifacts/html-report']) {
@@ -284,17 +342,39 @@ function massVars(mass) {
   return vars;
 }
 
-/** Extrai mensagens "SUT_ERROR: <texto>" lançadas pelo spec (tela de erro do SUT). */
-function detectSutErrors(runOut) {
-  const src = [runOut?.reportErrors || [], runOut?.log || ''].join('\n---\n');
+/**
+ * O Playwright imprime o trecho de código que falhou; essas linhas contêm o
+ * literal do marcador e não são a mensagem lançada em runtime.
+ */
+function looksLikeSourceLine(line) {
+  return /new Error\s*\(|throw\s|['"`]\s*\+|\+\s*['"`]|\);\s*$|^\s*>?\s*\d+\s*\|/.test(line);
+}
+
+/** Extrai mensagens "<MARCADOR>: <texto>" realmente lançadas na execução. */
+function detectMarker(runOut, marker) {
+  const src = [...(runOut?.reportErrors || []), runOut?.log || ''].join('\n---\n');
+  const re = new RegExp(`${marker}:\\s*([^\\r\\n]+)`, 'gi');
   const found = [];
-  const re = /SUT_ERROR:\s*([^\r\n]+)/gi;
   let m;
   while ((m = re.exec(src)) !== null) {
+    const lineStart = src.lastIndexOf('\n', m.index) + 1;
+    const nl = src.indexOf('\n', m.index);
+    const line = src.slice(lineStart, nl === -1 ? undefined : nl);
+    if (looksLikeSourceLine(line)) continue;
     const text = m[1].trim();
-    if (text && !found.some((f) => f === text)) found.push(text);
+    if (text && !found.includes(text)) found.push(text);
   }
   return found.slice(0, 5);
+}
+
+/** Extrai mensagens "SUT_ERROR: <texto>" lançadas pelo spec (tela de erro do SUT). */
+function detectSutErrors(runOut) {
+  return detectMarker(runOut, 'SUT_ERROR');
+}
+
+/** Extrai "FLOW_CONTEXT_LOST: <texto>" (tela herdada da fila sequencial não bateu). */
+function detectFlowContextLost(runOut) {
+  return detectMarker(runOut, 'FLOW_CONTEXT_LOST');
 }
 
 /** Empacota screenshots + report + html + test-results + spec em artifacts/runs/<ts>-<code>/ e poda o histórico. */
@@ -366,9 +446,18 @@ async function ensureSpec(ctx, { root, agentKey, reuseSpec }) {
 
 /**
  * Run a single Studio test case (UI Playwright or API Postman).
- * @returns {{ ok: boolean, result: string, executionId?: number, code: string, recorded?: boolean, evidenceDir?: string, error?: string }}
+ * @returns {{ ok: boolean, result: string, executionId?: number, code: string, recorded?: boolean, evidenceDir?: string, error?: string, skipped?: boolean, stopped?: boolean, flowMode?: string }}
  */
-async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudge } = {}) {
+async function runOneCase(caseId, {
+  root,
+  agentName,
+  headed,
+  reuseSpec,
+  skipJudge,
+  sequentialFlow = false,
+  flowMode = 'start',
+  previousCase = null
+} = {}) {
   const cwd = root;
   const t0 = Date.now();
   const timings = {};
@@ -390,15 +479,20 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     preconditions: tc.preconditions || '',
     steps,
     mass,
-    baseURL: process.env.TARGET_BASE_URL
+    baseURL: process.env.TARGET_BASE_URL,
+    flowMode: sequentialFlow ? flowMode : 'start',
+    sequentialFlow: !!sequentialFlow,
+    previousCase: previousCase || null
   };
   mark('api');
 
-  console.log(`[agent-runner] Caso ${tc.code} (${tc.type}) via agent:${agentKey}`);
+  console.log(`[agent-runner] Caso ${tc.code} (${tc.type}) via agent:${agentKey}${sequentialFlow ? ` [flow=${ctx.flowMode}]` : ''}`);
 
   let judgment;
   let artifactPath;
   let runOut = {};
+  let skipped = false;
+  let stopped = false;
   try {
     if (API_TYPES.has(tc.type)) {
       console.log('[agent-runner] Gerando coleção Postman...');
@@ -435,7 +529,7 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
           }
         } catch { /* ignore */ }
       }
-      if (!headed && !fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1' && process.env.SSO_HEADLESS_WAIT !== '1') {
+      if (!headed && !fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1' && process.env.SSO_HEADLESS_WAIT !== '1' && !sequentialFlow) {
         throw new InfraError(
           `SSO requer login manual, mas a execução é headless e não há sessão salva. ` +
           `Rode o primeiro caso sem --headless para salvar a sessão (${path.relative(root, statePath)}), ` +
@@ -443,28 +537,29 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
         );
       }
       cleanCaseScreenshots(cwd, tc.id);
-      const specPath = await ensureSpec(ctx, { root, agentKey, reuseSpec });
+      let specPath = await ensureSpec(ctx, { root, agentKey, reuseSpec });
       artifactPath = specPath;
       mark('spec');
 
+      const pwOpts = { headed, statePath, useFlowCdp: !!sequentialFlow };
       console.log('[agent-runner] Executando Playwright...');
-      runOut = await runPlaywright(cwd, specPath, { headed, statePath });
+      runOut = await runPlaywright(cwd, specPath, pwOpts);
       runOut.screenshots = collectScreenshots(cwd, tc.id);
       mark('run');
 
-      // Tela de erro do SUT: regenera o spec UMA vez com o contexto e re-executa.
-      const firstSut = detectSutErrors(runOut);
-      if (firstSut.length) {
-        console.warn(`[agent-runner] Tela de erro do SUT detectada; regenerando spec e re-executando...`);
-        console.warn('  - ' + firstSut.join('\n  - '));
-        const hint = `A tela exibiu erro do sistema: ${firstSut.join(' | ')}. ` +
-          `Ajuste o fluxo (navegação/seleções/esperas) para o sistema carregar a tela de fato. ` +
-          `Se após tentar o erro persistir, falhe com throw new Error('SUT_ERROR: ' + <texto>).`;
-        const newSpec = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: hint, specPath });
+      // Imprevisto (SUT / seletor / contexto): regenera o spec UMA vez e re-executa.
+      if (runOut.exitCode !== 0 && isUnexpectedFailure(runOut, null)) {
+        const hint = unexpectedHint(runOut, null) ||
+          `Ajuste o fluxo (navegação/seleções/esperas). Se a tela herdada sumiu, lance FLOW_CONTEXT_LOST.`;
+        console.warn(`[agent-runner] Imprevisto detectado; regenerando spec e re-executando...`);
+        console.warn('  - ' + hint.replace(/\s+/g, ' ').slice(0, 240));
+        const gen = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: hint, specPath });
+        const newSpec = gen.specPath || specPath;
         const compileErr = await validateSpec(root, newSpec);
         if (!compileErr) {
           artifactPath = newSpec;
-          runOut = await runPlaywright(cwd, newSpec, { headed, statePath });
+          specPath = newSpec;
+          runOut = await runPlaywright(cwd, newSpec, pwOpts);
           runOut.screenshots = collectScreenshots(cwd, tc.id);
           mark('run');
         } else {
@@ -472,14 +567,62 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
         }
       }
 
-      if (runOut.screenshots.length < steps.length) {
+      // Ainda imprevisto em fila sequencial → pede decisão na UI (regen / skip / stop).
+      while (sequentialFlow && runOut.exitCode !== 0 && isUnexpectedFailure(runOut, null)) {
+        const errText = unexpectedHint(runOut, null) || 'Falha inesperada na execução';
+        requestFix({ caseId: tc.id, code: tc.code, error: errText });
+        const action = await waitForFixAction();
+        if (action === 'stop') {
+          stopped = true;
+          console.log('[FLOW] STOPPED_AFTER_FAIL');
+          break;
+        }
+        if (action === 'skip') {
+          skipped = true;
+          console.log(`[FLOW] SKIPPED case=${tc.code}`);
+          break;
+        }
+        // regen
+        clearFixMarkers();
+        const hint = `Usuário pediu regenerar após imprevisto:\n${errText}`;
+        console.log('[agent-runner] Regenerando spec a pedido do usuário...');
+        const gen = await generateSpec(ctx, { agentName: agentKey, cwd, fixHint: hint, specPath });
+        const newSpec = gen.specPath || specPath;
+        const compileErr = await validateSpec(root, newSpec);
+        if (compileErr) {
+          console.warn('[agent-runner] Spec regenerado não compilou:', compileErr);
+          runOut = { ...runOut, log: (runOut.log || '') + '\n' + compileErr, exitCode: 1 };
+          continue;
+        }
+        artifactPath = newSpec;
+        specPath = newSpec;
+        runOut = await runPlaywright(cwd, newSpec, pwOpts);
+        runOut.screenshots = collectScreenshots(cwd, tc.id);
+        mark('run');
+      }
+
+      if (runOut.screenshots.length < steps.length && !skipped && !stopped) {
         console.warn(
           `[agent-runner] Aviso: ${steps.length} passo(s), ${runOut.screenshots.length} screenshot(s) capturada(s) — evidência incompleta para o judge.`
         );
       }
     }
 
-    if (skipJudge) {
+    if (skipped) {
+      judgment = {
+        result: 'Não Executado',
+        actual_result: 'Caso pulado na fila sequencial (imprevisto)',
+        notes: 'FLOW skip',
+        step_results: steps.map((s) => ({ order: s.order, actual: 'Pulado', result: 'Não Executado' }))
+      };
+    } else if (stopped) {
+      judgment = {
+        result: 'Bloqueado',
+        actual_result: unexpectedHint(runOut, null) || 'Fila parada pelo usuário após imprevisto',
+        notes: 'FLOW stop',
+        step_results: steps.map((s) => ({ order: s.order, actual: 'Parado', result: 'Não Executado' }))
+      };
+    } else if (skipJudge) {
       judgment = fallbackJudgment(steps, runOut);
       judgment.notes = (judgment.notes || '') + ' (skipJudge)';
     } else {
@@ -497,7 +640,7 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     }
     // Tela de erro do SUT não é um veredito do teste → Bloqueado (ambiente, retryável).
     const sutErrors = detectSutErrors(runOut);
-    if (sutErrors.length) {
+    if (sutErrors.length && !skipped) {
       judgment = {
         ...judgment,
         result: 'Bloqueado',
@@ -505,8 +648,16 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
         notes: (judgment.notes || '') + ' | Falha de ambiente no SUT: ' + sutErrors.join(' | ')
       };
     }
+    if (detectFlowContextLost(runOut).length && !skipped) {
+      judgment = {
+        ...judgment,
+        result: 'Bloqueado',
+        actual_result: unexpectedHint(runOut, judgment),
+        notes: (judgment.notes || '') + ' | FLOW_CONTEXT_LOST'
+      };
+    }
     // Timeout de infraestrutura do Playwright não é um veredito real → Bloqueado (retryável).
-    if (runOut.infraTimeout) {
+    if (runOut.infraTimeout && !skipped) {
       judgment = {
         ...judgment,
         result: 'Bloqueado',
@@ -530,11 +681,35 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       result: 'Bloqueado',
       executionId: exec?.id,
       code: tc.code,
+      caseId: tc.id,
+      title: tc.title,
       error: err.message,
       recorded,
       evidenceDir,
       fallbackFile: file,
-      timings
+      timings,
+      flowMode: ctx.flowMode,
+      lastStep: steps.length ? `${steps[steps.length - 1].order}. ${steps[steps.length - 1].action}` : '',
+      stopped: false,
+      skipped: false
+    };
+  }
+
+  // Pular: não grava execução de veredito; só sinaliza para a fila.
+  if (skipped) {
+    timings.totalMs = Date.now() - t0;
+    clearFixMarkers();
+    return {
+      ok: false,
+      result: 'Pulado',
+      code: tc.code,
+      caseId: tc.id,
+      title: tc.title,
+      skipped: true,
+      stopped: false,
+      timings,
+      flowMode: ctx.flowMode,
+      lastStep: steps.length ? `${steps[steps.length - 1].order}. ${steps[steps.length - 1].action}` : ''
     };
   }
 
@@ -544,7 +719,7 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     test_case_id: tc.id,
     environment: process.env.TEST_ENV || 'Homologação',
     tester: `agent:${agentKey}`,
-    result: judgment.result,
+    result: judgment.result === 'Não Executado' ? 'Bloqueado' : judgment.result,
     actual_result: judgment.actual_result,
     notes: judgment.notes,
     step_results: judgment.step_results
@@ -554,15 +729,24 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
   timings.totalMs = Date.now() - t0;
 
   console.log(`[agent-runner] Execução id=${exec?.id || 'N/A'} result=${judgment.result}`);
+  if (judgment.result === 'Falhou') console.log(`[FLOW] STOPPED_AFTER_FAIL case=${tc.code}`);
+
+  clearFixMarkers();
   return {
     ok: judgment.result === 'Passou',
     result: judgment.result,
     executionId: exec?.id,
     code: tc.code,
+    caseId: tc.id,
+    title: tc.title,
     recorded,
     evidenceDir,
     error: recorded ? undefined : file,
-    timings
+    timings,
+    flowMode: ctx.flowMode,
+    lastStep: steps.length ? `${steps[steps.length - 1].order}. ${steps[steps.length - 1].action}` : '',
+    stopped,
+    skipped: false
   };
 }
 
@@ -572,5 +756,9 @@ module.exports = {
   ALLOWED_TYPES,
   UI_TYPES,
   API_TYPES,
-  parseSteps
+  parseSteps,
+  staticSpecViolations,
+  isUnexpectedFailure,
+  detectSutErrors,
+  detectFlowContextLost
 };
