@@ -36,8 +36,8 @@ function collectItems(items, acc = []) {
   return acc;
 }
 
-function buildVars(collection, baseURL) {
-  const vars = { baseUrl: baseURL, baseURL };
+function buildVars(collection, baseURL, extraVars = {}) {
+  const vars = { baseUrl: baseURL, baseURL, ...extraVars };
   for (const v of collection?.variable || []) {
     if (v?.key) vars[v.key] = v.value ?? '';
   }
@@ -46,8 +46,8 @@ function buildVars(collection, baseURL) {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-async function runPostmanCollection(collection, { baseURL, timeoutMs } = {}) {
-  const vars = buildVars(collection, baseURL || process.env.TARGET_BASE_URL || '');
+async function runPostmanCollection(collection, { baseURL, timeoutMs, vars: extraVars } = {}) {
+  const vars = buildVars(collection, baseURL || process.env.TARGET_BASE_URL || '', extraVars);
   const requests = collectItems(collection.item);
   const results = [];
   let log = '';

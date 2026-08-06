@@ -274,8 +274,18 @@ function validateApiCollection(collection) {
   return issues;
 }
 
+/** Massa de teste (name→data) vira variáveis {{var}} resolvidas no request da coleção. */
+function massVars(mass) {
+  const vars = {};
+  for (const m of mass || []) {
+    const v = m.data ?? m.value ?? '';
+    vars[m.name] = typeof v === 'string' ? v : JSON.stringify(v);
+  }
+  return vars;
+}
+
 /** Empacota screenshots + report + html + test-results + spec em artifacts/runs/<ts>-<code>/ e poda o histórico. */
-function bundleEvidence(root, { caseCode, caseId, artifactPath, runOut, judgment }) {
+function bundleEvidence(root, { caseCode, caseId, artifactPath, runOut, judgment, execution }) {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const safeCode = String(caseCode || caseId).replace(/[^\w.-]/g, '_');
   const dir = path.join(root, 'artifacts', 'runs', `run-${ts}-${safeCode}`);
@@ -298,6 +308,9 @@ function bundleEvidence(root, { caseCode, caseId, artifactPath, runOut, judgment
   if (judgment) {
     const slim = { result: judgment.result, actual_result: judgment.actual_result, notes: judgment.notes, step_results: judgment.step_results };
     try { fs.writeFileSync(path.join(dir, 'judgment.json'), JSON.stringify(slim, null, 2), 'utf8'); } catch { /* ignore */ }
+  }
+  if (execution) {
+    try { fs.writeFileSync(path.join(dir, 'execution.json'), JSON.stringify(execution, null, 2), 'utf8'); } catch { /* ignore */ }
   }
   pruneRuns(root);
   return dir;
@@ -344,6 +357,9 @@ async function ensureSpec(ctx, { root, agentKey, reuseSpec }) {
  */
 async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudge } = {}) {
   const cwd = root;
+  const t0 = Date.now();
+  const timings = {};
+  const mark = (k) => { timings[k + 'Ms'] = Date.now() - t0; };
   const { key: agentKey } = getAdapter(agentName);
 
   const tc = await api.getTestCase(caseId);
@@ -363,6 +379,7 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     mass,
     baseURL: process.env.TARGET_BASE_URL
   };
+  mark('api');
 
   console.log(`[agent-runner] Caso ${tc.code} (${tc.type}) via agent:${agentKey}`);
 
@@ -387,11 +404,24 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
         throw new InfraError(`Coleção Postman inválida após regeneração:\n${issues.join('\n')}`);
       }
 
+      mark('spec');
       console.log('[agent-runner] Executando requests...');
-      runOut = await runPostmanCollection(collection, { baseURL: ctx.baseURL });
+      runOut = await runPostmanCollection(collection, { baseURL: ctx.baseURL, vars: massVars(mass) });
       process.stdout.write(runOut.log);
+      mark('run');
     } else {
       const statePath = statePathFor(ctx.baseURL);
+      if (fs.existsSync(statePath)) {
+        const maxAgeMs = (Number(process.env.SSO_STATE_MAX_AGE_DAYS) || 7) * 24 * 60 * 60 * 1000;
+        try {
+          const ageMs = Date.now() - fs.statSync(statePath).mtimeMs;
+          if (ageMs > maxAgeMs) {
+            console.warn(
+              `[agent-runner] Aviso: sessão SSO (${path.relative(root, statePath)}) tem mais de ${Math.round(ageMs / (24 * 60 * 60 * 1000))} dia(s) — pode ter expirado. Rode um caso sem --headless para refazer o login.`
+            );
+          }
+        } catch { /* ignore */ }
+      }
       if (!headed && !fs.existsSync(statePath) && process.env.SSO_STATE_OFF !== '1' && process.env.SSO_HEADLESS_WAIT !== '1') {
         throw new InfraError(
           `SSO requer login manual, mas a execução é headless e não há sessão salva. ` +
@@ -402,10 +432,12 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       cleanCaseScreenshots(cwd, tc.id);
       const specPath = await ensureSpec(ctx, { root, agentKey, reuseSpec });
       artifactPath = specPath;
+      mark('spec');
 
       console.log('[agent-runner] Executando Playwright...');
       runOut = await runPlaywright(cwd, specPath, { headed, statePath });
       runOut.screenshots = collectScreenshots(cwd, tc.id);
+      mark('run');
       if (runOut.screenshots.length < steps.length) {
         console.warn(
           `[agent-runner] Aviso: ${steps.length} passo(s), ${runOut.screenshots.length} screenshot(s) capturada(s) — evidência incompleta para o judge.`
@@ -425,6 +457,7 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
         judgment = fallbackJudgment(steps, runOut);
       }
     }
+    mark('judge');
     if (!judgment.step_results?.length && steps.length) {
       judgment = { ...judgment, ...fallbackJudgment(steps, runOut), notes: judgment.notes };
     }
@@ -444,8 +477,10 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       caseId: tc.id,
       artifactPath,
       runOut,
-      judgment: { result: 'Bloqueado', actual_result: err.message, notes: '', step_results: [] }
+      judgment: { result: 'Bloqueado', actual_result: err.message, notes: '', step_results: [] },
+      execution: { id: exec?.id || null, recorded, error: file || null }
     });
+    timings.totalMs = Date.now() - t0;
     return {
       ok: false,
       result: 'Bloqueado',
@@ -454,7 +489,8 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
       error: err.message,
       recorded,
       evidenceDir,
-      fallbackFile: file
+      fallbackFile: file,
+      timings
     };
   }
 
@@ -470,7 +506,8 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     step_results: judgment.step_results
   };
   const { exec, recorded, file } = await recordExecution(root, payload, tc);
-  const evidenceDir = bundleEvidence(root, { caseCode: tc.code, caseId: tc.id, artifactPath, runOut, judgment });
+  const evidenceDir = bundleEvidence(root, { caseCode: tc.code, caseId: tc.id, artifactPath, runOut, judgment, execution: { id: exec?.id || null, recorded } });
+  timings.totalMs = Date.now() - t0;
 
   console.log(`[agent-runner] Execução id=${exec?.id || 'N/A'} result=${judgment.result}`);
   return {
@@ -480,7 +517,8 @@ async function runOneCase(caseId, { root, agentName, headed, reuseSpec, skipJudg
     code: tc.code,
     recorded,
     evidenceDir,
-    error: recorded ? undefined : file
+    error: recorded ? undefined : file,
+    timings
   };
 }
 

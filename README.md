@@ -44,6 +44,7 @@ Os dados ficam no arquivo local `data/qa.db` (SQLite). Uso pessoal, sem login.
 | `PLAYWRIGHT_RETRIES` | agent-runner | `0` | Reexecuta o caso automaticamente em falha (ex.: `1` na CI) |
 | `SSO_STATE_OFF` | agent-runner | — | `1` desliga o reuso de sessão de login entre casos da fila |
 | `SSO_HEADLESS_WAIT` | agent-runner | — | `1` aguarda o botão "Já fiz login" do Studio mesmo em headless (default: falha rápido) |
+| `SSO_STATE_MAX_AGE_DAYS` | agent-runner | `7` | Avisa quando a sessão SSO salva está mais velha que N dias (provável expiração) |
 | `CASE_RETRIES` | agent-runner | `1` | Retenta casos que falharam por infra (timeout/crash/rede); veredito `Falhou` nunca retenta |
 | `EVIDENCE_RUNS` | agent-runner | `20` | Bundles de evidência mantidos em `artifacts/runs/` (mais antigos são apagados) |
 | `ARTIFACT_MAX_BYTES` | agent-runner | `10485760` | Tamanho máximo de artefato persistido em `specs/` |
@@ -134,6 +135,8 @@ npm.cmd run test:agent -- --caseId=22 --headless
 # Fila da tarefa (só Automatizado; use --all-modes para incluir Manual)
 npm.cmd run test:agent -- --taskId=3 --type=Funcional
 npm.cmd run test:agent -- --taskId=3 --type=API
+# Regrava no Studio as execuções que caíram no fallback local (API estava fora)
+npm.cmd run test:agent -- --replay-failed
 ```
 
-Artifacts (screenshots / logs) em `agent-runner/artifacts/`. Cada caso gera um bundle de evidência em `artifacts/runs/<timestamp>-<código>/` (screenshots, report.json, HTML report, spec) — os mais antigos são podados (`EVIDENCE_RUNS`). Specs são cacheados por **hash do conteúdo**: só são reutilizados se passos/massa não mudaram. A sessão de login é salva por ambiente em `artifacts/sso-state-<hash>.json`. Se a API cair ao gravar o resultado, o veredito é preservado em `artifacts/failed-executions/`.
+Artifacts (screenshots / logs) em `agent-runner/artifacts/`. Cada caso gera um bundle de evidência em `artifacts/runs/<timestamp>-<código>/` (screenshots, report.json, HTML report, spec, judgment.json, execution.json) — os mais antigos são podados (`EVIDENCE_RUNS`). Specs são cacheados por **hash do conteúdo**: só são reutilizados se passos/massa não mudaram. A sessão de login é salva por ambiente em `artifacts/sso-state-<hash>.json`. Se a API cair ao gravar o resultado, o veredito é preservado em `artifacts/failed-executions/` e pode ser regravado com `--replay-failed` quando a API voltar. Cada fila grava `artifacts/results.json` (resumo por caso, com tempos por etapa) e `artifacts/last-run.json` (lista dos bundles mais recentes).

@@ -96,7 +96,8 @@ function parseArgs(argv) {
     agent: null,
     automatedOnly: true,
     reuseSpec: false,
-    skipJudge: false
+    skipJudge: false,
+    replayFailed: false
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -104,6 +105,7 @@ function parseArgs(argv) {
     else if (a === '--headless') out.headed = false;
     else if (a === '--reuseSpec') out.reuseSpec = true;
     else if (a === '--skipJudge') out.skipJudge = true;
+    else if (a === '--replay-failed') out.replayFailed = true;
     else if (a === '--all-modes') out.automatedOnly = false;
     else if (a.startsWith('--caseId=')) out.caseId = Number(a.slice('--caseId='.length));
     else if (a === '--caseId') out.caseId = Number(argv[++i]);
