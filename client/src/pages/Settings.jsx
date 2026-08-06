@@ -91,7 +91,20 @@ export default function Settings() {
       downloadJson(data, `qa-studio-${slug}-${stamp}.json`);
       flash(setBackupMsg, `Projeto "${project?.name || ''}" exportado com sucesso.`);
     } catch (e) {
-      setBackupError(e.message || 'Falha ao exportar o projeto.');
+      const msg = e.message || '';
+      if (/não encontrad/i.test(msg)) {
+        // Lista desatualizada (projeto apagado ou banco substituído): recarrega o seletor.
+        const list = await api.get('/projects').catch(() => []);
+        const arr = list || [];
+        setProjects(arr);
+        setExportId(arr.length ? String(arr[0].id) : '');
+        setBackupError('O projeto selecionado não existe mais — a lista foi atualizada. ' +
+          'Se os projetos sumiram de repente, verifique se o arquivo data/qa.db não foi substituído ou restaurado.');
+      } else if (/rota não encontrada/i.test(msg)) {
+        setBackupError('O servidor ainda está com a versão antiga. Reinicie o servidor (npm start ou npm run dev) para habilitar o backup.');
+      } else {
+        setBackupError(msg || 'Falha ao exportar o projeto.');
+      }
     } finally {
       setBusy('');
     }

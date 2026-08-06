@@ -31,6 +31,17 @@ export function AppProvider({ children }) {
     refreshProjects().finally(() => setLoading(false));
   }, [refreshProjects]);
 
+  // Adota um projeto válido quando o id salvo (localStorage) não existe mais
+  // (ex.: banco substituído/restaurado ou projeto excluído). Evita o fallback
+  // instável para projects[0] com o estado desatualizado.
+  useEffect(() => {
+    if (!projects.length) return;
+    if (projects.some((p) => p.id === projectId)) return;
+    const adopted = projects[0].id;
+    setProjectIdState(adopted);
+    localStorage.setItem('qa_project', String(adopted));
+  }, [projects, projectId]);
+
   const current = projects.find((p) => p.id === projectId) || projects[0] || null;
   const resolvedProjectId = current ? current.id : 0;
 

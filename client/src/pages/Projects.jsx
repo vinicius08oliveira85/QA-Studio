@@ -18,9 +18,17 @@ export default function Projects() {
   const save = async () => {
     if (!form.name.trim()) return;
     try {
-      if (editing) await api.put('/projects/' + editing.id, { ...form, status: editing.status });
-      else await api.post('/projects', form);
+      let newId = null;
+      if (editing) {
+        await api.put('/projects/' + editing.id, { ...form, status: editing.status });
+      } else {
+        const r = await api.post('/projects', form);
+        newId = r.id;
+      }
       await refreshProjects();
+      // Criação pela página Projetos também passa a selecionar o novo projeto
+      // (igual ao fluxo do sidebar), evitando id fantasma no estado/localStorage.
+      if (newId) setProjectId(newId);
       refresh();
       setError('');
       setCreating(false); setEditing(null);

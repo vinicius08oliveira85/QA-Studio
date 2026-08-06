@@ -44,10 +44,12 @@ const PROJECT_MENU = [
 
 function TaskWorkspace() {
   const { taskId: paramId } = useParams();
-  const { setTaskId, taskId, tasks, refreshTasks, projectId } = useApp();
+  const { setTaskId, taskId, tasks, projectId, setProjectId } = useApp();
   const navigate = useNavigate();
   const id = Number(paramId);
   const checkedRef = React.useRef(false);
+  const projectIdRef = React.useRef(projectId);
+  useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
 
   useEffect(() => {
     if (!id) return;
@@ -55,18 +57,28 @@ function TaskWorkspace() {
   }, [id, taskId, setTaskId]);
 
   useEffect(() => {
-    if (!id || !tasks.length) return;
-    const found = tasks.find((t) => t.id === id);
-    if (found) {
+    if (!id) return;
+    // Tarefa já presente na lista do projeto atual: tudo certo.
+    if (tasks.some((t) => t.id === id)) {
       checkedRef.current = false;
       return;
     }
     if (checkedRef.current) return;
     checkedRef.current = true;
-    refreshTasks(projectId).then((list) => {
-      if (!list.find((t) => t.id === id)) navigate('/tarefas', { replace: true });
-    });
-  }, [id, tasks, refreshTasks, projectId, navigate]);
+    let cancelled = false;
+    // Tarefa fora do projeto atual (ex.: voltou pelo histórico após trocar de projeto,
+    // ou id órfão): localiza o projeto dono e troca para ele — a tarefa não "some".
+    api.get('/tasks/' + id).then((t) => {
+      if (cancelled) return;
+      if (t && Number(t.project_id) !== Number(projectIdRef.current)) {
+        setProjectId(t.project_id);
+        return;
+      }
+      if (!t) navigate('/tarefas', { replace: true });
+      // Tarefa do projeto atual: a lista do contexto carrega e normaliza o chip.
+    }).catch(() => { if (!cancelled) navigate('/tarefas', { replace: true }); });
+    return () => { cancelled = true; };
+  }, [id, tasks, projectId, navigate, setProjectId]);
 
   return (
     <div className="task-workspace">
