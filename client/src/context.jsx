@@ -9,8 +9,18 @@ export function AppProvider({ children }) {
   const [projectId, setProjectIdState] = useState(() => Number(localStorage.getItem('qa_project')) || 0);
   const [taskId, setTaskIdState] = useState(() => Number(localStorage.getItem('qa_task')) || 0);
   const [loading, setLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState('');
 
-  const refreshProjects = useCallback(() => api.get('/projects').then(setProjects).catch(() => setProjects([])), []);
+  // Uma falha de rede não pode zerar a lista: isso derruba projeto e tarefa de
+  // uma vez e parece perda de dados. Mantém o último estado bom e sinaliza o erro.
+  const refreshProjects = useCallback(() => api.get('/projects').then((list) => {
+    setProjects(list || []);
+    setConnectionError('');
+    return list || [];
+  }).catch((e) => {
+    setConnectionError(e?.message || 'Não foi possível falar com o servidor.');
+    return [];
+  }), []);
 
   const refreshTasks = useCallback((pid) => {
     const id = pid || projectId;
@@ -19,10 +29,11 @@ export function AppProvider({ children }) {
       return Promise.resolve([]);
     }
     return api.get('/tasks?projectId=' + id).then((list) => {
-      setTasks(list);
-      return list;
-    }).catch(() => {
-      setTasks([]);
+      setTasks(list || []);
+      setConnectionError('');
+      return list || [];
+    }).catch((e) => {
+      setConnectionError(e?.message || 'Não foi possível falar com o servidor.');
       return [];
     });
   }, [projectId]);
@@ -30,17 +41,6 @@ export function AppProvider({ children }) {
   useEffect(() => {
     refreshProjects().finally(() => setLoading(false));
   }, [refreshProjects]);
-
-  // Adota um projeto válido quando o id salvo (localStorage) não existe mais
-  // (ex.: banco substituído/restaurado ou projeto excluído). Evita o fallback
-  // instável para projects[0] com o estado desatualizado.
-  useEffect(() => {
-    if (!projects.length) return;
-    if (projects.some((p) => p.id === projectId)) return;
-    const adopted = projects[0].id;
-    setProjectIdState(adopted);
-    localStorage.setItem('qa_project', String(adopted));
-  }, [projects, projectId]);
 
   const current = projects.find((p) => p.id === projectId) || projects[0] || null;
   const resolvedProjectId = current ? current.id : 0;
@@ -81,7 +81,8 @@ export function AppProvider({ children }) {
     taskId,
     setTaskId,
     refreshTasks,
-    loading
+    loading,
+    connectionError
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

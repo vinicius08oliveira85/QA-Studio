@@ -24,8 +24,6 @@ const app = express();
 app.disable('x-powered-by');
 if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use(helmet());
-// Import de backups: payload pode exceder o limite global (100kb) — parser específico antes do global.
-app.use('/api/backups/import', express.json({ limit: '25mb' }));
 app.use(express.json());
 
 // Rate limiting global e específico para endpoints caros (IA paga / spawn de processos).
@@ -82,8 +80,7 @@ const routes = {
   '/api/dashboard': require('./routes/dashboard'),
   '/api/settings': require('./routes/settings'),
   '/api/ai': require('./routes/ai'),
-  '/api/agent-runs': require('./routes/agentRuns'),
-  '/api/backups': require('./routes/backups')
+  '/api/agent-runs': require('./routes/agentRuns')
 };
 for (const [prefix, factory] of Object.entries(routes)) {
   app.use(prefix, factory(db));

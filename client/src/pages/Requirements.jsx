@@ -47,7 +47,10 @@ export default function Requirements() {
     if (!form.title.trim()) return;
     await run(async () => {
       if (editing) await api.put('/requirements/' + editing.id, form);
-      else await api.post('/requirements', { ...form, project_id: current.id, task_id: taskId });
+      else {
+        if (!current?.id || !taskId) throw new Error('Nenhum projeto/tarefa ativo. Recarregue a página.');
+        await api.post('/requirements', { ...form, project_id: current.id, task_id: taskId });
+      }
       refresh();
       setCreating(false); setEditing(null);
     });

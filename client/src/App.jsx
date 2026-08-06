@@ -44,12 +44,10 @@ const PROJECT_MENU = [
 
 function TaskWorkspace() {
   const { taskId: paramId } = useParams();
-  const { setTaskId, taskId, tasks, projectId, setProjectId } = useApp();
+  const { setTaskId, taskId, tasks, refreshTasks, projectId } = useApp();
   const navigate = useNavigate();
   const id = Number(paramId);
   const checkedRef = React.useRef(false);
-  const projectIdRef = React.useRef(projectId);
-  useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
 
   useEffect(() => {
     if (!id) return;
@@ -57,28 +55,18 @@ function TaskWorkspace() {
   }, [id, taskId, setTaskId]);
 
   useEffect(() => {
-    if (!id) return;
-    // Tarefa já presente na lista do projeto atual: tudo certo.
-    if (tasks.some((t) => t.id === id)) {
+    if (!id || !tasks.length) return;
+    const found = tasks.find((t) => t.id === id);
+    if (found) {
       checkedRef.current = false;
       return;
     }
     if (checkedRef.current) return;
     checkedRef.current = true;
-    let cancelled = false;
-    // Tarefa fora do projeto atual (ex.: voltou pelo histórico após trocar de projeto,
-    // ou id órfão): localiza o projeto dono e troca para ele — a tarefa não "some".
-    api.get('/tasks/' + id).then((t) => {
-      if (cancelled) return;
-      if (t && Number(t.project_id) !== Number(projectIdRef.current)) {
-        setProjectId(t.project_id);
-        return;
-      }
-      if (!t) navigate('/tarefas', { replace: true });
-      // Tarefa do projeto atual: a lista do contexto carrega e normaliza o chip.
-    }).catch(() => { if (!cancelled) navigate('/tarefas', { replace: true }); });
-    return () => { cancelled = true; };
-  }, [id, tasks, projectId, navigate, setProjectId]);
+    refreshTasks(projectId).then((list) => {
+      if (!list.find((t) => t.id === id)) navigate('/tarefas', { replace: true });
+    });
+  }, [id, tasks, refreshTasks, projectId, navigate]);
 
   return (
     <div className="task-workspace">
@@ -200,6 +188,17 @@ function Sidebar() {
   );
 }
 
+function ConnectionBanner() {
+  const { connectionError } = useApp();
+  if (!connectionError) return null;
+  return (
+    <ErrorBanner>
+      {connectionError} Seus dados não foram perdidos — o servidor pode estar parado.
+      Verifique o terminal do <code>npm start</code> e recarregue a página.
+    </ErrorBanner>
+  );
+}
+
 function Shell() {
   const { current, loading } = useApp();
   if (loading) return <div className="boot">Carregando...</div>;
@@ -209,6 +208,7 @@ function Shell() {
       <div className="layout">
         <Sidebar />
         <main className="content">
+          <ConnectionBanner />
           <Routes>
             <Route path="*" element={<Projects />} />
           </Routes>
@@ -221,6 +221,7 @@ function Shell() {
     <div className="layout">
       <Sidebar />
       <main className="content">
+        <ConnectionBanner />
         <Routes>
           <Route path="/" element={<Navigate to="/tarefas" replace />} />
           <Route path="/tarefas" element={<Tasks />} />

@@ -14,6 +14,7 @@ const dbPath = process.env.QA_DB_PATH || path.join(dataDir, 'qa.db');
 
 
 const db = new DatabaseSync(dbPath);
+console.log('[db] Banco SQLite em:', dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
@@ -91,6 +92,34 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_exec_task ON executions(task_id);
   CREATE INDEX IF NOT EXISTS idx_bugs_task ON bugs(task_id);
 `);
+
+/**
+ * Move as páginas do WAL para o arquivo principal e trunca o -wal.
+ * Sem isso os dados ficam só no data/qa.db-wal, e um encerramento abrupto
+ * (ou um sync de nuvem que substitui os arquivos) descarta tudo.
+ */
+db.checkpoint = () => {
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch (err) {
+    console.warn('[db] Falha no checkpoint do WAL:', err.message || err);
+  }
+};
+
+db.checkpoint();
+
+const checkpointMs = process.env.QA_DB_CHECKPOINT_MS === undefined
+  ? 30_000
+  : Number(process.env.QA_DB_CHECKPOINT_MS);
+const checkpointTimer = checkpointMs > 0 ? setInterval(db.checkpoint, checkpointMs) : null;
+checkpointTimer?.unref();
+
+const closeRaw = db.close.bind(db);
+db.close = () => {
+  if (checkpointTimer) clearInterval(checkpointTimer);
+  db.checkpoint();
+  closeRaw();
+};
 
 db.nextCode = (table, prefix, projectId) => {
   const row = projectId

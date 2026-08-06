@@ -4,8 +4,15 @@ const { DatabaseSync } = require('node:sqlite');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const dataDir = path.join(__dirname, '..', 'data');
-const dbPath = path.join(dataDir, 'qa.db');
+// Respeita QA_DB_PATH (banco fora do repositório, ex.: fora de pastas sincronizadas).
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile(path.join(__dirname, '..', '.env'));
+  } catch { /* sem .env: usa o padrão */ }
+}
+
+const dbPath = process.env.QA_DB_PATH || path.join(__dirname, '..', 'data', 'qa.db');
+const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dbPath)) {
   console.error('Banco não encontrado em ' + dbPath);
   process.exit(1);

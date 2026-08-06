@@ -94,22 +94,6 @@ jobs do agent-runner iniciados pela UI (o servidor propaga `process.env` ao proc
 - **Automação:** sugere casos repetitivos (com muitas execuções) para automatização e atualiza o modo dos casos.
 - **Dashboard:** consolida as métricas de todas as seções e alerta requisitos sem cobertura de testes.
 
-## Backup de projetos (Exportar / Importar)
-
-Na tela **Configurações**:
-
-- **Exportar projeto** — baixa um arquivo JSON com o projeto e todos os dados vinculados
-  (tarefas, requisitos, regras de negócio, estratégias, cenários, casos de teste com passos,
-  massa de teste, execuções, bugs e retestes, regressões, automações e releases).
-- **Importar projeto** — restaura um arquivo de backup criando um **projeto novo** (os ids são
-  remapeados automaticamente, preservando todas as referências entre os registros). O backup
-  pode ser importado em qualquer máquina ou após migrar o `data/qa.db`.
-
-O arquivo tem assinatura `{ "app": "qa-studio", "type": "project-export", "version": 1 }` e a
-chave da API Gemini (`settings`) nunca é exportada. A importação roda em transação: se qualquer
-passo falhar, nenhum dado é gravado. API: `GET /api/backups/projects/:id/export` e
-`POST /api/backups/import` (aceita arquivos de até 25 MB).
-
 ## Estrutura
 
 ```

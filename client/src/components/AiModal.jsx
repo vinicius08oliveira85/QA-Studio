@@ -147,6 +147,7 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
 
   const apply = async () => {
     if (!taskId) { setError('Abra uma tarefa primeiro para aplicar o conteúdo.'); return; }
+    if (!current?.id) { setError('Nenhum projeto ativo. Recarregue a página antes de aplicar.'); return; }
     if (!parsed) { setError('Resposta da IA inválida: não contém JSON estruturado.'); return; }
     if (replacesSection && !confirmReplace) {
       setConfirmReplace(true);
