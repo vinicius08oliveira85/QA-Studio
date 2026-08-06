@@ -5,7 +5,7 @@ import { Btn, Empty, ErrorBanner, Field, Header, Input, Modal, Textarea, useList
 
 export default function Projects() {
   const { projects, current, setProjectId, refreshProjects } = useApp();
-  const { items, refresh } = useList(api.get.bind(api, '/projects'));
+  const { items, refresh } = useList(React.useCallback(() => api.get('/projects'), []));
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);

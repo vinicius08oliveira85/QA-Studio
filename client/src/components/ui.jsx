@@ -42,11 +42,17 @@ export function Modal({ open, onClose, title, children, footer, width = 620 }) {
   const ref = useRef(null);
   const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2, 8)}`);
 
+  // Mantém o onClose acessível sem entrar nas dependências do efeito de foco:
+  // consumidores passam arrow functions inline, e reexecutar o efeito a cada
+  // render roubaria o foco do campo em uso a cada tecla digitada.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
     const prevFocus = document.activeElement;
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); return; }
       if (e.key === 'Tab' && ref.current) {
         const focusables = ref.current.querySelectorAll(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -60,7 +66,9 @@ export function Modal({ open, onClose, title, children, footer, width = 620 }) {
     };
     window.addEventListener('keydown', onKey);
     const t = setTimeout(() => {
-      const f = ref.current?.querySelector('input, select, textarea, button');
+      const body = ref.current?.querySelector('.modal-body');
+      const f = body?.querySelector('input, select, textarea, button')
+        || ref.current?.querySelector('button');
       if (f) f.focus();
     }, 0);
     return () => {
@@ -68,7 +76,7 @@ export function Modal({ open, onClose, title, children, footer, width = 620 }) {
       clearTimeout(t);
       if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

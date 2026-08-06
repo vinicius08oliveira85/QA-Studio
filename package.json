@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "QA Studio - Aplicativo de testes para QA (gestão integrada do ciclo de testes)",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node server/index.js",

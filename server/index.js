@@ -7,6 +7,7 @@ const db = require('./db');
 
 const app = express();
 app.disable('x-powered-by');
+if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use(helmet());
 app.use(express.json());
 
@@ -75,10 +76,13 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
 });
 
-const dist = path.join(__dirname, '..', 'client', 'dist');
-if (fs.existsSync(dist)) {
-  app.use(express.static(dist));
-  app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+// Em local/produção tradicional o Express serve o SPA; na Vercel o CDN serve client/dist.
+if (!process.env.VERCEL) {
+  const dist = path.join(__dirname, '..', 'client', 'dist');
+  if (fs.existsSync(dist)) {
+    app.use(express.static(dist));
+    app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+  }
 }
 
 // Middleware de erro global: sempre responde JSON
@@ -90,20 +94,25 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'Erro interno do servidor.' });
 });
 
-const PORT = process.env.PORT || 3001;
-const server = app.listen(PORT, () => console.log(`QA Studio API rodando em http://localhost:${PORT}`));
+module.exports = app;
 
-// Graceful shutdown: encerra jobs do agent, fecha o server e o banco de forma limpa.
-function shutdown(signal) {
-  console.log(`\n[${signal}] Encerrando servidor...`);
-  try {
-    require('./routes/agentRuns').killAll();
-  } catch { /* módulo sem jobs ativos */ }
-  server.close(() => {
-    try { db.close(); } catch { /* já fechado */ }
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(1), 5000).unref();
+// Na Vercel o runtime serverless importa o app; localmente sobe o listen.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3001;
+  const server = app.listen(PORT, () => console.log(`QA Studio API rodando em http://localhost:${PORT}`));
+
+  // Graceful shutdown: encerra jobs do agent, fecha o server e o banco de forma limpa.
+  function shutdown(signal) {
+    console.log(`\n[${signal}] Encerrando servidor...`);
+    try {
+      require('./routes/agentRuns').killAll();
+    } catch { /* módulo sem jobs ativos */ }
+    server.close(() => {
+      try { db.close(); } catch { /* já fechado */ }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 5000).unref();
+  }
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -2,14 +2,16 @@ const { DatabaseSync } = require('node:sqlite');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const dataDir = path.join(__dirname, '..', 'data');
+// Na Vercel o filesystem da função é efêmero; só /tmp é gravável.
+const dataDir = process.env.QA_DB_PATH
+  ? path.dirname(process.env.QA_DB_PATH)
+  : process.env.VERCEL
+    ? path.join('/tmp', 'qa-studio-data')
+    : path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = process.env.QA_DB_PATH || path.join(dataDir, 'qa.db');
-if (process.env.QA_DB_PATH) {
-  const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
+
 
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
