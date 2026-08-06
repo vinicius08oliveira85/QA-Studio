@@ -1,5 +1,20 @@
-const express = require('express');
+// Carrega variáveis de um arquivo .env na raiz do projeto (opcional), ANTES de qualquer
+// leitura de process.env. Usa o loader nativo do Node (>= 20.12), sem dependência externa.
+// Na Vercel não há arquivo .env: o catch ignora o ENOENT e as variáveis vêm do dashboard.
 const path = require('node:path');
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile(path.join(__dirname, '..', '.env'));
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      console.warn('[env] Falha ao ler .env:', err.message || err);
+    }
+  }
+} else {
+  console.warn('[env] Node muito antigo (sem process.loadEnvFile). Use Node >= 20.12 para suporte a .env.');
+}
+
+const express = require('express');
 const fs = require('node:fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');

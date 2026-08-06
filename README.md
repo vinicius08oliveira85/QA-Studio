@@ -30,12 +30,26 @@ Os dados ficam no arquivo local `data/qa.db` (SQLite). Uso pessoal, sem login.
 
 ## Variáveis de ambiente (opcionais)
 
+O servidor carrega automaticamente um arquivo `.env` na raiz do projeto (usando o loader nativo do
+Node ≥ 20.12, sem dependência externa) antes de ler qualquer variável. Copie o
+[`.env.example`](.env.example) para `.env` e ajuste — o `.env` é ignorado pelo git. As mesmas
+variáveis também podem ser exportadas no shell; na Vercel elas são definidas em
+*Project Settings → Environment Variables*. Variáveis definidas no `.env` também são repassadas aos
+jobs do agent-runner iniciados pela UI (o servidor propaga `process.env` ao processo filho).
+
+> Precedência: valores já definidos no ambiente (shell ou Vercel) **vencem** os do `.env` — o loader
+> nativo não sobrescreve variáveis existentes, igual ao comportamento padrão do dotenv.
+
 | Variável | Onde | Padrão | Efeito |
 |---|---|---|---|
+| `GEMINI_API_KEY` | servidor | — | Chave da API Gemini (alternativa à tela Configurações) |
+| `GEMINI_TIMEOUT_MS` | servidor | `60000` | Timeout do fetch à API Gemini |
 | `PORT` | servidor | `3001` | Porta da API |
 | `APP_TOKEN` | servidor | — | Exige header `x-app-token` em `/api` (acesso remoto) |
 | `CORS_ORIGIN` | servidor | — | Habilita CORS para o client em outra origem |
-| `GEMINI_TIMEOUT_MS` | servidor | `60000` | Timeout do fetch à API Gemini |
+| `QA_DB_PATH` | servidor | `data/qa.db` | Caminho do banco SQLite |
+| `AGENT` | servidor | `opencode` | Agente padrão dos jobs de execução automática |
+| `AGENT_JOB_TIMEOUT_MS` | servidor | `1800000` | Tempo máximo de um job de execução com agent (30 min) |
 | `QA_API_BASE` | tests / agent-runner | `http://localhost:3001/api` | URL da API para `scripts/test-api.js` |
 | `QA_APP_TOKEN` | agent-runner | — | Enviado como `x-app-token` ao chamar a API |
 | `QA_API_TIMEOUT_MS` / `QA_API_RETRIES` | agent-runner | `30000` / `0` | Timeout e tentativas do client HTTP do runner |
