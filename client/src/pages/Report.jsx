@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context.jsx';
-import { api, evidenceUrl, fmtDate } from '../api.js';
+import { api, bugEvidenceUrl, evidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Header, Loading, Modal } from '../components/ui.jsx';
 import { toneFor } from '../utils.js';
 
@@ -106,10 +106,11 @@ export default function Report() {
     if (open_bugs_list.length > 0) {
       L.push('## Bugs em aberto');
       L.push('');
-      L.push('| Bug | Título | Severidade | Prioridade | Caso relacionado |');
-      L.push('|---|---|---|---|---|');
+      L.push('| Bug | Título | Severidade | Prioridade | Caso relacionado | Evidência |');
+      L.push('|---|---|---|---|---|---|');
       for (const b of open_bugs_list) {
-        L.push(`| ${mdEscape(b.code)} | ${mdEscape(b.title)} | ${mdEscape(b.severity)} | ${mdEscape(b.priority)} | ${mdEscape(b.test_case_code || '-')} |`);
+        const ev = b.attachment_path ? `[📎 abrir](/api/bugs/${b.id}/attachment)` : '-'
+        L.push(`| ${mdEscape(b.code)} | ${mdEscape(b.title)} | ${mdEscape(b.severity)} | ${mdEscape(b.priority)} | ${mdEscape(b.test_case_code || '-')} | ${ev} |`);
       }
       L.push('');
     }
@@ -241,7 +242,7 @@ export default function Report() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
-                    <tr><th>Bug</th><th>Título</th><th>Severidade</th><th>Prioridade</th><th>Caso relacionado</th><th>Status</th></tr>
+                    <tr><th>Bug</th><th>Título</th><th>Severidade</th><th>Prioridade</th><th>Caso relacionado</th><th>Status</th><th>Evidência</th></tr>
                   </thead>
                   <tbody>
                     {data.open_bugs_list.map((b) => (
@@ -252,6 +253,11 @@ export default function Report() {
                         <td><Badge tone={toneFor(b.priority)}>{b.priority}</Badge></td>
                         <td>{b.test_case_code || '-'}</td>
                         <td><Badge tone={toneFor(b.status)}>{b.status}</Badge></td>
+                        <td>
+                          {b.attachment_path ? (
+                            <a className="evidence-chip" href={bugEvidenceUrl(b.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                          ) : '-'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

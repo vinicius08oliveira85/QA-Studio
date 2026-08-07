@@ -1,14 +1,28 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Btn, Field, Input, Modal, Select, Textarea } from './ui.jsx';
 
 /**
  * Modal compartilhado de "Reportar bug".
  * Props:
- *  - form, onChange(patch), onCancel, onSubmit, context (texto do destaque)
+ *  - form, onChange(patch), onCancel, onSubmit(file), context (texto do destaque)
  *  - busy?: desabilita botões durante o submit
  *  - requirements?: [{ id, code, title }] — opcional, renderiza seletor de requisito
+ * O arquivo de evidência selecionado é entregue no onSubmit(file) — o pai cria o
+ * bug e faz o upload (o bug ainda não existe quando o arquivo é escolhido).
  */
 export default function ReportBugModal({ form, onChange, onCancel, onSubmit, context, requirements, busy }) {
+  const [file, setFile] = useState(null);
+  const fileRef = useRef(null);
+  const wasOpen = useRef(false);
+
+  // Reseta o arquivo pendente apenas na transição fechado → aberto (o form muda
+  // de referência a cada tecla digitada e não pode disparar o reset).
+  useEffect(() => {
+    const open = !!form;
+    if (open && !wasOpen.current) setFile(null);
+    wasOpen.current = open;
+  }, [form]);
+
   if (!form) return null;
   const set = (k) => (e) => onChange({ [k]: e.target.value });
   return (
@@ -44,9 +58,24 @@ export default function ReportBugModal({ form, onChange, onCancel, onSubmit, con
         <Field label="Resultado esperado"><Textarea value={form.expected_result} onChange={set('expected_result')} /></Field>
         <Field label="Resultado obtido"><Textarea value={form.actual_result} onChange={set('actual_result')} /></Field>
       </div>
+      {file ? (
+        <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+          <span className="small">📎 {file.name}</span>
+          <Btn className="gray small" onClick={() => setFile(null)}>Remover</Btn>
+        </div>
+      ) : (
+        <div className="evidence-drop" style={{ padding: 10 }} role="button" tabIndex={0}
+          onClick={() => fileRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}>
+          <span className="small">Anexar screenshot do problema (opcional)</span>
+          <input ref={fileRef} type="file" hidden
+            accept="image/*,.pdf,.txt,.log,.json,.csv,.html,.xml,.zip"
+            onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </div>
+      )}
       <div className="modal-foot-inline">
         <Btn className="gray" disabled={busy} onClick={onCancel}>Cancelar</Btn>
-        <Btn className="danger" disabled={busy} onClick={onSubmit}>{busy ? 'Registrando...' : 'Registrar bug'}</Btn>
+        <Btn className="danger" disabled={busy} onClick={() => onSubmit(file)}>{busy ? 'Registrando...' : 'Registrar bug'}</Btn>
       </div>
     </Modal>
   );

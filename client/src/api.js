@@ -40,6 +40,9 @@ export const api = {
 /** URL do download da evidência de uma execução (usar em <a href> ou <img src>). */
 export const evidenceUrl = (executionId) => `/api/executions/${executionId}/attachment`;
 
+/** URL do download da evidência de um bug. */
+export const bugEvidenceUrl = (bugId) => `/api/bugs/${bugId}/attachment`;
+
 /** Lê um File/Blob e devolve base64 (sem prefixo data:). */
 export const fileToBase64 = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();

@@ -42,9 +42,12 @@ if (tableColumns('test_strategies').length && !hasColumn('test_strategies', 'req
   db.exec('ALTER TABLE test_strategies ADD COLUMN requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL');
 }
 
-// Migração: attachment_path em executions (evidências de execução — bancos antigos)
+// Migração: attachment_path em executions e bugs (evidências — bancos antigos)
 if (tableColumns('executions').length && !hasColumn('executions', 'attachment_path')) {
   db.exec("ALTER TABLE executions ADD COLUMN attachment_path TEXT DEFAULT ''");
+}
+if (tableColumns('bugs').length && !hasColumn('bugs', 'attachment_path')) {
+  db.exec("ALTER TABLE bugs ADD COLUMN attachment_path TEXT DEFAULT ''");
 }
 
 // Migração: task_id nas entidades do ciclo de testes (bancos antigos)

@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useApp } from '../context.jsx';
-import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
+import { api, bugEvidenceUrl, fmtDate } from '../api.js';
+import { Badge, Btn, Empty, ErrorBanner, EvidenceBox, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import { BUG_STATUS, SEVERITIES, toneFor } from '../utils.js';
 
 const blank = {
@@ -46,10 +46,21 @@ export default function Bugs() {
   const save = async () => {
     if (!form.title.trim()) return;
     await run(async () => {
-      if (editing) await api.put('/bugs/' + editing.id, form);
-      else await api.post('/bugs', { ...form, project_id: current.id, task_id: taskId });
+      if (editing) {
+        await api.put('/bugs/' + editing.id, form);
+        setCreating(false); setEditing(null);
+      } else {
+        // Cria o bug e entra em modo edição: o usuário anexa a evidência na hora.
+        const created = await api.post('/bugs', { ...form, project_id: current.id, task_id: taskId });
+        const full = await api.get('/bugs/' + created.id);
+        setEditing(full);
+        setForm({
+          ...blank, ...full,
+          execution_id: full.execution_id || '', test_case_id: full.test_case_id || '', requirement_id: full.requirement_id || ''
+        });
+        setCreating(false);
+      }
       refresh();
-      setCreating(false); setEditing(null);
     });
   };
 
@@ -123,7 +134,7 @@ export default function Bugs() {
         <div className="table-wrap">
           {filtered.length === 0 ? <Empty>Nenhum bug encontrado.</Empty> : (
             <table className="table">
-              <thead><tr><th>Código</th><th>Título</th><th>Caso</th><th>Severidade</th><th>Status</th><th>Retestes</th><th>Criado</th><th /></tr></thead>
+              <thead><tr><th>Código</th><th>Título</th><th>Caso</th><th>Severidade</th><th>Status</th><th>Retestes</th><th>Evidência</th><th>Criado</th><th /></tr></thead>
               <tbody>
                 {filtered.map((b) => (
                   <tr key={b.id}>
@@ -133,6 +144,13 @@ export default function Bugs() {
                     <td><Badge tone={toneFor(b.severity)}>{b.severity}</Badge></td>
                     <td><Badge tone={toneFor(b.status)}>{b.status}</Badge></td>
                     <td>{b.retests_count}</td>
+                    <td>
+                      {b.attachment_path ? (
+                        <a className="evidence-chip" href={bugEvidenceUrl(b.id)} target="_blank" rel="noreferrer" title="Abrir evidência">
+                          📎 {b.attachment_path.split('/').pop()}
+                        </a>
+                      ) : <span className="muted small">—</span>}
+                    </td>
                     <td className="small">{fmtDate(b.created_at)}</td>
                     <td>
                       <div className="row-actions">
@@ -186,6 +204,16 @@ export default function Bugs() {
           <Field label="Resultado esperado"><Textarea value={form.expected_result} onChange={(e) => setForm({ ...form, expected_result: e.target.value })} /></Field>
           <Field label="Resultado obtido"><Textarea value={form.actual_result} onChange={(e) => setForm({ ...form, actual_result: e.target.value })} /></Field>
         </div>
+        {editing && (
+          <div className="mt">
+            <EvidenceBox
+              kind="bug"
+              ownerId={editing.id}
+              attachmentPath={form.attachment_path}
+              onChange={(p) => setForm({ ...form, attachment_path: p })}
+            />
+          </div>
+        )}
         <div className="modal-foot-inline"><Btn onClick={save}>{editing ? 'Salvar' : 'Criar'}</Btn></div>
       </Modal>
 
@@ -207,6 +235,15 @@ export default function Bugs() {
                 <h3>Resultado</h3>
                 <div className="mono-block">{`Esperado:\n${detail.expected_result || '-'}\n\nObtido:\n${detail.actual_result || '-'}`}</div>
               </div>
+            </div>
+
+            <div className="mt mb">
+              <EvidenceBox
+                kind="bug"
+                ownerId={detail.id}
+                attachmentPath={detail.attachment_path}
+                onChange={(p) => { setDetail({ ...detail, attachment_path: p }); refresh(); }}
+              />
             </div>
 
             <h3>Retestes ({detail.retests.length})</h3>

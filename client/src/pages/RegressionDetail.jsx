@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
-import { api } from '../api.js';
+import { api, fileToBase64 } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Field, Header, Loading, Select } from '../components/ui.jsx';
 import ReportBugModal from '../components/ReportBugModal.jsx';
 import { toneFor } from '../utils.js';
@@ -59,10 +59,16 @@ export default function RegressionDetail() {
     });
   };
 
-  const submitBug = async () => {
+  const submitBug = async (file) => {
     try {
-      await api.post('/bugs', { ...bugForm, project_id: current.id });
+      const created = await api.post('/bugs', { ...bugForm, project_id: current.id });
       setBugForm(null);
+      if (file && created?.id) {
+        try {
+          const data = await fileToBase64(file);
+          await api.post(`/bugs/${created.id}/attachment`, { filename: file.name, data });
+        } catch (e) { setError(`Bug criado, mas falha ao anexar a evidência: ${e.message || 'erro'}`); }
+      }
     } catch (e) { setError(e.message || 'Falha ao registrar bug.'); }
   };
 

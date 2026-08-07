@@ -1,11 +1,7 @@
 const express = require('express');
-const fs = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { validateTaskOwnership } = require('../helpers');
-
-// Tipos aceitos no upload de evidência (por extensão)
-const ALLOWED_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'pdf', 'txt', 'log', 'json', 'csv', 'html', 'xml', 'zip']);
+const { saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage } = require('../attachments');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -123,48 +119,17 @@ module.exports = (db) => {
     const row = db.prepare('SELECT id FROM executions WHERE id=?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
     const { filename = '', data = '' } = req.body || {};
-    if (!data) return res.status(400).json({ error: 'Arquivo vazio' });
-
-    let buf;
-    try { buf = Buffer.from(String(data), 'base64'); } catch { return res.status(400).json({ error: 'Base64 inválido' }); }
-    if (buf.length === 0) return res.status(400).json({ error: 'Arquivo vazio' });
-
-    const ext = (path.extname(String(filename)).replace('.', '') || 'png').toLowerCase();
-    if (!ALLOWED_EXT.has(ext)) {
-      return res.status(400).json({ error: `Extensão não permitida: .${ext}` });
-    }
-
-    const dir = db.attachmentsDir();
-    const hash = crypto.createHash('sha1').update(data).digest('hex').slice(0, 12);
-    const savedName = `${req.params.id}-${hash}.${ext}`;
-    const abs = path.join(dir, savedName);
-    const rel = `attachments/${savedName}`;
-
-    // Grava o novo arquivo primeiro; só remove o antigo depois de gravar com
-    // sucesso (se a gravação falhar, a evidência anterior fica preservada).
-    fs.writeFileSync(abs, buf);
-    const previous = db.prepare('SELECT attachment_path FROM executions WHERE id=?').get(req.params.id)?.attachment_path;
-    if (previous && previous !== rel) removeFileByPath(db, previous);
-    db.prepare("UPDATE executions SET attachment_path=? WHERE id=?")
-      .run(rel, req.params.id);
-
-    res.json({ ok: true, attachment_path: rel });
+    const out = saveAttachment(db, 'executions', req.params.id, filename, data);
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.json({ ok: true, attachment_path: out.attachment_path });
   });
 
   /** Download da evidência (inline para imagens, download para o resto). */
   router.get('/:id/attachment', (req, res) => {
-    const row = db.prepare('SELECT attachment_path FROM executions WHERE id=?').get(req.params.id);
-    if (!row?.attachment_path) return res.status(404).json({ error: 'Sem evidência anexada' });
+    const abs = resolveAttachment(db, 'executions', req.params.id);
+    if (!abs) return res.status(404).json({ error: 'Sem evidência anexada' });
 
-    const dir = path.resolve(db.attachmentsDir());
-    const abs = path.resolve(path.join(dir, path.basename(row.attachment_path)));
-    if (!abs.startsWith(dir + path.sep) || !fs.existsSync(abs)) {
-      return res.status(404).json({ error: 'Arquivo de evidência não encontrado' });
-    }
-
-    const ext = path.extname(abs).replace('.', '').toLowerCase();
-    const image = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext);
-    res.setHeader('Content-Disposition', `${image ? 'inline' : 'attachment'}; filename="${path.basename(abs)}"`);
+    res.setHeader('Content-Disposition', `${isImage(abs) ? 'inline' : 'attachment'}; filename="${path.basename(abs)}"`);
     res.setHeader('Cache-Control', 'no-store');
     res.sendFile(abs, (err) => {
       if (err && !res.headersSent) res.status(500).json({ error: 'Falha ao enviar a evidência.' });
@@ -175,27 +140,9 @@ module.exports = (db) => {
   router.delete('/:id/attachment', (req, res) => {
     const row = db.prepare('SELECT id FROM executions WHERE id=?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
-    removeAttachmentFile(db, Number(req.params.id));
-    db.prepare("UPDATE executions SET attachment_path='' WHERE id=?")
-      .run(req.params.id);
+    removeAttachment(db, 'executions', req.params.id);
     res.json({ ok: true });
   });
 
   return router;
 };
-
-/** Apaga o arquivo de evidência da execução (se existir) sem tocar no banco. */
-function removeAttachmentFile(db, executionId) {
-  try {
-    const row = db.prepare('SELECT attachment_path FROM executions WHERE id=?').get(executionId);
-    if (row?.attachment_path) removeFileByPath(db, row.attachment_path);
-  } catch { /* arquivo já inexistente */ }
-}
-
-/** Apaga o arquivo de evidência por caminho relativo (sem tocar no banco). */
-function removeFileByPath(db, relPath) {
-  try {
-    const abs = path.join(path.resolve(db.attachmentsDir()), path.basename(relPath));
-    if (fs.existsSync(abs)) fs.unlinkSync(abs);
-  } catch { /* arquivo já inexistente */ }
-}

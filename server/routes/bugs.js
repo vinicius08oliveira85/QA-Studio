@@ -1,5 +1,7 @@
 const express = require('express');
+const path = require('node:path');
 const { validateTaskOwnership } = require('../helpers');
+const { saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage } = require('../attachments');
 
 module.exports = (db) => {
   const router = express.Router();
@@ -110,9 +112,41 @@ module.exports = (db) => {
   });
 
   router.delete('/:id', (req, res) => {
+    const row = db.prepare('SELECT id, attachment_path FROM bugs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
+    const savedPath = row.attachment_path;
+    db.prepare('DELETE FROM bugs WHERE id=?').run(req.params.id);
+    // Remove o arquivo de evidência depois de capturar o caminho (a linha já foi apagada).
+    if (savedPath) removeFileByPath(db, savedPath);
+    res.json({ ok: true });
+  });
+
+  /** Upload de evidência (screenshot/anexo) para um bug. */
+  router.post('/:id/attachment', (req, res) => {
     const row = db.prepare('SELECT id FROM bugs WHERE id=?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
-    db.prepare('DELETE FROM bugs WHERE id=?').run(req.params.id);
+    const { filename = '', data = '' } = req.body || {};
+    const out = saveAttachment(db, 'bugs', req.params.id, filename, data);
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.json({ ok: true, attachment_path: out.attachment_path });
+  });
+
+  /** Download da evidência do bug (inline para imagens, download para o resto). */
+  router.get('/:id/attachment', (req, res) => {
+    const abs = resolveAttachment(db, 'bugs', req.params.id);
+    if (!abs) return res.status(404).json({ error: 'Sem evidência anexada' });
+    res.setHeader('Content-Disposition', `${isImage(abs) ? 'inline' : 'attachment'}; filename="${path.basename(abs)}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(abs, (err) => {
+      if (err && !res.headersSent) res.status(500).json({ error: 'Falha ao enviar a evidência.' });
+    });
+  });
+
+  /** Remove a evidência anexada (arquivo + campo). */
+  router.delete('/:id/attachment', (req, res) => {
+    const row = db.prepare('SELECT id FROM bugs WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Bug não encontrado' });
+    removeAttachment(db, 'bugs', req.params.id);
     res.json({ ok: true });
   });
 

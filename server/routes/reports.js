@@ -116,7 +116,7 @@ module.exports = (db) => {
       `SELECT COUNT(*) AS c FROM bugs WHERE task_id = ? AND status IN ('Aberto','Em Correção')`
     ).get(taskId).c;
     const openBugsList = db.prepare(`
-      SELECT b.code, b.title, b.severity, b.priority, b.status, b.created_at,
+      SELECT b.id, b.code, b.title, b.severity, b.priority, b.status, b.created_at, b.attachment_path,
         tc.code AS test_case_code
       FROM bugs b
       LEFT JOIN test_cases tc ON tc.id = b.test_case_id

@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
-import { api, fmtDate } from '../api.js';
+import { api, fileToBase64, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, EvidenceBox, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
 import { evidenceUrl } from '../api.js';
 import EnvSelect from '../components/EnvSelect.jsx';
@@ -227,13 +227,21 @@ export default function Execution({ type }) {
     setViewing(null);
   };
 
-  const submitBug = async () => {
+  const submitBug = async (file) => {
     if (bugBusy) return;
     setBugBusy(true);
     try {
-      await api.post('/bugs', { ...bugForm, project_id: current.id, task_id: taskId });
+      const created = await api.post('/bugs', { ...bugForm, project_id: current.id, task_id: taskId });
       setBugForm(null);
       refreshExecs();
+      if (file && created?.id) {
+        try {
+          const data = await fileToBase64(file);
+          await api.post(`/bugs/${created.id}/attachment`, { filename: file.name, data });
+        } catch (e) {
+          setError(`Bug criado, mas falha ao anexar a evidência: ${e.message || 'erro'}`);
+        }
+      }
     } catch (e) {
       setError(e.message || 'Falha ao registrar bug.');
     } finally {
@@ -447,7 +455,7 @@ export default function Execution({ type }) {
             {viewing.notes && <div className="kv"><span className="k">Observações</span><span className="v">{viewing.notes}</span></div>}
             <div className="mt mb">
               <EvidenceBox
-                executionId={viewing.id}
+                ownerId={viewing.id}
                 attachmentPath={viewing.attachment_path}
                 onChange={() => {
                   api.get('/executions/' + viewing.id).then(setViewing).catch(() => {});

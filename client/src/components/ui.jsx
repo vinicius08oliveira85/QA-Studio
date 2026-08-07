@@ -1,26 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, evidenceUrl, fileToBase64 } from '../api.js';
+import { api, bugEvidenceUrl, evidenceUrl, fileToBase64 } from '../api.js';
 
 /**
- * Bloco de evidência de execução: upload, preview, download e remoção.
- * props: executionId, attachmentPath, onChange (recebe attachment_path ou ''), small
+ * Bloco de evidência: upload, preview, download e remoção.
+ * props: ownerId (id da execução ou bug), kind ('execution' | 'bug'),
+ *        attachmentPath, onChange (recebe attachment_path ou '')
  */
-export function EvidenceBox({ executionId, attachmentPath, onChange, label = 'Evidência (screenshot/anexo)' }) {
+export function EvidenceBox({ ownerId, kind = 'execution', attachmentPath, onChange, label = 'Evidência (screenshot/anexo)' }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(null);
   const has = Boolean(attachmentPath);
+  const base = kind === 'bug' ? 'bugs' : 'executions';
+  const url = (id) => (kind === 'bug' ? bugEvidenceUrl(id) : evidenceUrl(id));
 
   useEffect(() => { setPreview(null); setError(''); }, [attachmentPath]);
 
   const upload = async (file) => {
-    if (!file || !executionId) return;
+    if (!file || !ownerId) return;
     setBusy(true);
     setError('');
     try {
       const data = await fileToBase64(file);
-      const r = await api.post(`/executions/${executionId}/attachment`, { filename: file.name, data });
+      const r = await api.post(`/${base}/${ownerId}/attachment`, { filename: file.name, data });
       if (onChange) onChange(r.attachment_path || `attachments/${file.name}`);
       if (inputRef.current) inputRef.current.value = '';
     } catch (e) {
@@ -31,11 +34,11 @@ export function EvidenceBox({ executionId, attachmentPath, onChange, label = 'Ev
   };
 
   const remove = async () => {
-    if (!executionId) return;
+    if (!ownerId) return;
     setBusy(true);
     setError('');
     try {
-      await api.del(`/executions/${executionId}/attachment`);
+      await api.del(`/${base}/${ownerId}/attachment`);
       if (onChange) onChange('');
     } catch (e) {
       setError(e?.message || 'Falha ao remover evidência.');
@@ -63,9 +66,9 @@ export function EvidenceBox({ executionId, attachmentPath, onChange, label = 'Ev
           <div className="evidence-thumb">
             {isImage ? (
               <img
-                src={preview || evidenceUrl(executionId)}
+                src={preview || url(ownerId)}
                 alt="Evidência"
-                onClick={() => window.open(evidenceUrl(executionId), '_blank')}
+                onClick={() => window.open(url(ownerId), '_blank')}
                 style={{ cursor: 'zoom-in' }}
               />
             ) : (
@@ -75,7 +78,7 @@ export function EvidenceBox({ executionId, attachmentPath, onChange, label = 'Ev
           <div className="evidence-meta">
             <span className="evidence-name">{attachmentPath?.split('/').pop() || 'evidência'}</span>
             <div className="evidence-actions">
-              <a className="btn ghost small" href={evidenceUrl(executionId)} target="_blank" rel="noreferrer">Abrir</a>
+              <a className="btn ghost small" href={url(ownerId)} target="_blank" rel="noreferrer">Abrir</a>
               {onChange && (
                 <Btn className="danger small" onClick={remove} disabled={busy}>Remover</Btn>
               )}
