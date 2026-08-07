@@ -133,7 +133,7 @@ export default function RegressionDetail() {
               <tbody>
                 {run.cases.map((rc) => (
                   <tr key={rc.id}>
-                    <td className="cell-title">{rc.code}</td>
+                    <td className="cell-code">{rc.code}</td>
                     <td className="cell-title">{rc.title}<div className="cell-sub">{rc.requirement_code ? `${rc.requirement_code} - ${rc.requirement_title}` : ''}</div></td>
                     <td><Badge tone="blue">{rc.type}</Badge></td>
                     <td>{rc.open_bugs > 0 ? <Badge tone="red">{rc.open_bugs}</Badge> : '-'}</td>

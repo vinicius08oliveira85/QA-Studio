@@ -135,7 +135,8 @@ export default function AiModal({ open, onClose, initialScope = 'completo', onAp
     setConfirmReplace(false);
     setLoading(true);
     try {
-      const r = await api.post('/ai/generate', { prompt });
+      // taskId: o servidor injeta os materiais anexados à tarefa no prompt.
+      const r = await api.post('/ai/generate', { prompt, taskId });
       setResponseText(JSON.stringify(r.content, null, 2));
     } catch (e) {
       setError(e.message);

@@ -102,7 +102,7 @@ export default function ReleaseDetail() {
               <tbody>
                 {rel.requirements.map((r) => (
                   <tr key={r.id}>
-                    <td className="cell-title">{r.code}</td>
+                    <td className="cell-code">{r.code}</td>
                     <td className="cell-title">{r.title}</td>
                     <td><Badge tone={toneFor(r.priority)}>{r.priority}</Badge></td>
                     <td>{r.cases_count}</td>

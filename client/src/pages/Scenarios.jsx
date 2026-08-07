@@ -113,7 +113,7 @@ export default function Scenarios() {
                 <tbody>
                   {detail.test_cases.map((tc) => (
                     <tr key={tc.id}>
-                      <td className="cell-title">{tc.code}</td>
+                      <td className="cell-code">{tc.code}</td>
                       <td>{tc.title}</td>
                       <td><Badge tone="blue">{tc.type}</Badge></td>
                       <td><Badge tone={toneFor(tc.priority)}>{tc.priority}</Badge></td>

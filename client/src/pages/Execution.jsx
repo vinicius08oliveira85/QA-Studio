@@ -3,10 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fileToBase64, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, EvidenceBox, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { IconPaperclip } from '../components/Icon.jsx';
 import { evidenceUrl } from '../api.js';
 import EnvSelect from '../components/EnvSelect.jsx';
 import ReportBugModal from '../components/ReportBugModal.jsx';
 import AgentChat from '../components/AgentChat.jsx';
+import Verdict from '../components/Verdict.jsx';
+import CompareExecutions from '../components/CompareExecutions.jsx';
 import { EXEC_RESULTS, toneFor } from '../utils.js';
 
 const TYPE_LABEL = { 'Fumaça': 'Fumaça', 'Funcional': 'Funcional', 'API': 'API' };
@@ -34,6 +37,16 @@ export default function Execution({ type }) {
   const [chatOpen, setChatOpen] = useState(false);
   const [blockedBy, setBlockedBy] = useState(null);
   const [error, setError] = useState('');
+  // Filtros e paginação do histórico de execução.
+  const [fResult, setFResult] = useState('');
+  const [fEnv, setFEnv] = useState('');
+  const [fRange, setFRange] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
+  // Comparador: até 2 execuções do mesmo caso selecionadas no histórico.
+  const [compareSel, setCompareSel] = useState([]);
+  const [compare, setCompare] = useState(null);
+  const [compareBusy, setCompareBusy] = useState(false);
   const pollTimer = React.useRef(null);
 
   React.useEffect(() => () => clearTimeout(pollTimer.current), []);
@@ -41,6 +54,72 @@ export default function Execution({ type }) {
   const caseIds = new Set(cases.map((c) => c.id));
   const history = execs.filter((e) => caseIds.has(e.test_case_id));
   const automatedCount = cases.filter((c) => c.execution_mode === 'Automatizado').length;
+
+  // Ambientes disponíveis no histórico (para o filtro).
+  const envOptions = [...new Set(history.map((e) => e.environment).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  // Recorte de período: '' = tudo, 'hoje' = desde 00:00, 'Nd' = últimos N dias.
+  const rangeCutoff = (() => {
+    if (!fRange) return null;
+    if (fRange === 'hoje') {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    }
+    const days = Number(fRange.replace('d', '')) || 0;
+    return days > 0 ? Date.now() - days * 24 * 60 * 60 * 1000 : null;
+  })();
+
+  const filtered = history.filter((e) => {
+    if (fResult && e.result !== fResult) return false;
+    if (fEnv && e.environment !== fEnv) return false;
+    if (rangeCutoff != null) {
+      const ts = new Date(String(e.execution_date || '').replace(' ', 'T')).getTime();
+      // Sem data válida: não esconde a linha por causa do filtro de período.
+      if (!Number.isNaN(ts) && ts < rangeCutoff) return false;
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const filtersActive = Boolean(fResult || fEnv || fRange);
+
+  // Mudou filtro → volta para a primeira página.
+  React.useEffect(() => { setPage(1); }, [fResult, fEnv, fRange]);
+
+  const clearFilters = () => { setFResult(''); setFEnv(''); setFRange(''); setPage(1); };
+
+  /** Marca/desmarca uma execução para comparação. Se o caso mudar, reinicia a seleção. */
+  const toggleCompare = (e) => {
+    setCompareSel((sel) => {
+      if (sel.includes(e.id)) return sel.filter((x) => x !== e.id);
+      const sameCase = sel.every((id) => {
+        const cur = execs.find((x) => x.id === id);
+        return !cur || cur.test_case_id === e.test_case_id;
+      });
+      if (!sameCase) return [e.id];
+      return sel.length < 2 ? [...sel, e.id] : [sel[1], e.id];
+    });
+  };
+
+  /** Abre o comparador buscando o detalhe (passos) das duas execuções selecionadas. */
+  const openCompare = async () => {
+    if (compareSel.length !== 2 || compareBusy) return;
+    setCompareBusy(true);
+    try {
+      const [a, b] = await Promise.all(compareSel.map((id) => api.get('/executions/' + id)));
+      setCompare({ a, b });
+    } catch (err) {
+      // Seleção pode ter ficado obsoleta (execução removida): limpa e informa.
+      setCompareSel([]);
+      setError(err.message || 'Falha ao carregar as execuções para comparação.');
+    } finally {
+      setCompareBusy(false);
+    }
+  };
   const canAgent = AGENT_TYPES.has(type);
   const reqMap = new Map();
   for (const c of cases) {
@@ -325,7 +404,7 @@ export default function Execution({ type }) {
                   const last = history.find((e) => e.test_case_id === tc.id);
                   return (
                     <tr key={tc.id}>
-                      <td className="cell-title">{tc.code}</td>
+                      <td className="cell-code">{tc.code}</td>
                       <td className="cell-title">{tc.title}</td>
                       <td>{tc.requirement_code || '-'}</td>
                       <td><Badge tone={tc.execution_mode === 'Automatizado' ? 'blue' : 'gray'}>{tc.execution_mode}</Badge></td>
@@ -355,14 +434,57 @@ export default function Execution({ type }) {
       )}
 
       <div className="panel">
-        <h2>Histórico de execução ({history.length})</h2>
-        {history.length === 0 ? <Empty>Nenhuma execução registrada ainda.</Empty> : (
+        <div className="panel-head-row">
+          <h2>Histórico de execução ({filtered.length}{filtersActive ? ` de ${history.length}` : ''})</h2>
+          <div className="history-toolbar">
+            <Select value={fResult} onChange={(e) => setFResult(e.target.value)} aria-label="Filtrar por resultado">
+              <option value="">Todos os resultados</option>
+              {EXEC_RESULTS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </Select>
+            <Select value={fEnv} onChange={(e) => setFEnv(e.target.value)} aria-label="Filtrar por ambiente">
+              <option value="">Todos os ambientes</option>
+              {envOptions.map((env) => <option key={env} value={env}>{env}</option>)}
+            </Select>
+            <Select value={fRange} onChange={(e) => setFRange(e.target.value)} aria-label="Filtrar por período">
+              <option value="">Todo o período</option>
+              <option value="hoje">Hoje</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+              <option value="90d">Últimos 90 dias</option>
+            </Select>
+            {filtersActive && <Btn className="ghost small" onClick={clearFilters}>Limpar filtros</Btn>}
+            {compareSel.length > 0 && (
+              <>
+                <span className="muted small compare-hint">
+                  {compareSel.length === 1 ? 'Selecione a 2ª execução do mesmo caso' : `2 execuções selecionadas (${compareSel.length}/2)`}
+                </span>
+                <Btn className="ghost small" disabled={compareSel.length !== 2 || compareBusy} onClick={openCompare}>
+                  {compareBusy ? 'Carregando…' : '⇄ Comparar execuções'}
+                </Btn>
+                <Btn className="ghost small" onClick={() => setCompareSel([])}>Limpar seleção</Btn>
+              </>
+            )}
+          </div>
+        </div>
+        {history.length === 0 ? <Empty>Nenhuma execução registrada ainda.</Empty> : filtered.length === 0 ? (
+          <Empty>Nenhuma execução encontrada com os filtros selecionados.</Empty>
+        ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Data</th><th>Caso</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th>Evidência</th><th /></tr></thead>
+              <thead><tr><th className="sel-col" aria-label="Selecionar para comparar" /><th>Data</th><th>Caso</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th>Evidência</th><th>Resultado Obtido</th><th /></tr></thead>
               <tbody>
-                {history.map((e) => (
-                  <tr key={e.id}>
+                {pageItems.map((e) => (
+                  <tr key={e.id} className={compareSel.includes(e.id) ? 'row-compare' : ''}>
+                    <td className="sel-col">
+                      <input
+                        type="checkbox"
+                        className="compare-check"
+                        checked={compareSel.includes(e.id)}
+                        onChange={() => toggleCompare(e)}
+                        aria-label={`Selecionar execução ${e.id} para comparar`}
+                        title="Selecionar para comparar com outra execução do mesmo caso"
+                      />
+                    </td>
                     <td className="small">{fmtDate(e.execution_date)}</td>
                     <td><span className="cell-title">{e.test_case_code}</span><div className="cell-sub">{e.test_case_title}</div></td>
                     <td>{e.environment}</td>
@@ -371,9 +493,12 @@ export default function Execution({ type }) {
                     <td>
                       {e.attachment_path ? (
                         <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">
-                          📎 {e.attachment_path.split('/').pop()}
+                          <IconPaperclip size={12} /> {e.attachment_path.split('/').pop()}
                         </a>
                       ) : <span className="muted small">—</span>}
+                    </td>
+                    <td className="small" style={{ maxWidth: 300 }}>
+                      {e.actual_result ? <Verdict text={e.actual_result} compact executionId={e.id} /> : <span className="muted small">—</span>}
                     </td>
                     <td>
                       <div className="row-actions">
@@ -385,6 +510,25 @@ export default function Execution({ type }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="pagination">
+            <span className="muted small">
+              {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
+            </span>
+            <Btn className="ghost small" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>‹ Anterior</Btn>
+            <select
+              className="input pagination-jump"
+              value={safePage}
+              onChange={(e) => setPage(Number(e.target.value))}
+              aria-label="Ir para a página"
+            >
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <option key={p} value={p}>Página {p} de {totalPages}</option>
+              ))}
+            </select>
+            <Btn className="ghost small" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>Próxima ›</Btn>
           </div>
         )}
       </div>
@@ -426,7 +570,7 @@ export default function Execution({ type }) {
               })}
             </Field>
 
-            <Field label="Resultado geral / evidências"><Textarea value={execForm.actual_result} onChange={(e) => setExecForm({ ...execForm, actual_result: e.target.value })} placeholder="O que realmente aconteceu (evidências, prints, logs)..." /></Field>
+            <Field label="Resultado Obtido"><Textarea value={execForm.actual_result} onChange={(e) => setExecForm({ ...execForm, actual_result: e.target.value })} placeholder="[HOMOL dd/mm/aaaa | URL] APROVADO. O que realmente aconteceu... Obs.: ... Evidencia: prints..." /></Field>
             <Field label="Observações"><Textarea value={execForm.notes} onChange={(e) => setExecForm({ ...execForm, notes: e.target.value })} /></Field>
 
             <div className="modal-foot-inline">
@@ -451,7 +595,12 @@ export default function Execution({ type }) {
               <div className="kv"><span className="k">Resultado</span><span className="v"><Badge tone={toneFor(viewing.result)}>{viewing.result}</Badge></span></div>
               <div className="kv"><span className="k">Executado por</span><span className="v">{viewing.tester}</span></div>
             </div>
-            {viewing.actual_result && <div className="highlight"><strong>Resultado geral:</strong> {viewing.actual_result}</div>}
+            {viewing.actual_result && (
+              <div className="mt mb">
+                <div className="field-label">Resultado Obtido</div>
+                <Verdict text={viewing.actual_result} executionId={viewing.id} />
+              </div>
+            )}
             {viewing.notes && <div className="kv"><span className="k">Observações</span><span className="v">{viewing.notes}</span></div>}
             <div className="mt mb">
               <EvidenceBox
@@ -493,6 +642,14 @@ export default function Execution({ type }) {
         context="Bug gerado a partir de uma execução falha. Ajuste os campos e confirme."
         requirements={requirements}
       />
+
+      {compare && (
+        <CompareExecutions
+          a={compare.a}
+          b={compare.b}
+          onClose={() => { setCompare(null); setCompareSel([]); }}
+        />
+      )}
     </div>
   );
 }

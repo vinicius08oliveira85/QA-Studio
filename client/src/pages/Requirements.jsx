@@ -127,7 +127,7 @@ export default function Requirements() {
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id}>
-                    <td className="cell-title">{r.source === 'ia' && <Badge tone="blue">IA</Badge>} {r.code}</td>
+                    <td className="cell-code">{r.source === 'ia' && <Badge tone="blue">IA</Badge>} {r.code}</td>
                     <td className="cell-title">{r.title}<div className="cell-sub">{r.description}</div></td>
                     <td>{r.module || '-'}</td>
                     <td><Badge tone={toneFor(r.priority)}>{r.priority}</Badge></td>
@@ -227,7 +227,7 @@ export default function Requirements() {
               <tbody>
                 {detail.test_cases.map((tc) => (
                   <tr key={tc.id}>
-                    <td className="cell-title">{tc.code}</td>
+                    <td className="cell-code">{tc.code}</td>
                     <td>{tc.title}</td>
                     <td><Badge tone="blue">{tc.type}</Badge></td>
                     <td><Badge tone={toneFor(tc.status)}>{tc.status}</Badge></td>

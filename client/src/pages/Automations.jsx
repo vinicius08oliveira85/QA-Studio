@@ -64,7 +64,7 @@ export default function Automations() {
               <tbody>
                 {suggestions.map((s) => (
                   <tr key={s.id}>
-                    <td className="cell-title">{s.code}</td>
+                    <td className="cell-code">{s.code}</td>
                     <td className="cell-title">{s.title}</td>
                     <td><Badge tone="blue">{s.type}</Badge></td>
                     <td>{s.exec_count}</td>

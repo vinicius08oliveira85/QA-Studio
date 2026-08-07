@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api, bugEvidenceUrl, evidenceUrl, fileToBase64 } from '../api.js';
+import { IconChevronRight, IconFile, IconX } from './Icon.jsx';
 
 /**
  * Bloco de evidência: upload, preview, download e remoção.
@@ -72,7 +73,7 @@ export function EvidenceBox({ ownerId, kind = 'execution', attachmentPath, onCha
                 style={{ cursor: 'zoom-in' }}
               />
             ) : (
-              <span className="evidence-file-icon">📄</span>
+              <span className="evidence-file-icon"><IconFile size={24} /></span>
             )}
           </div>
           <div className="evidence-meta">
@@ -92,10 +93,15 @@ export function EvidenceBox({ ownerId, kind = 'execution', attachmentPath, onCha
   );
 }
 
-export function Field({ label, required, children, className = '' }) {
+export function Field({ label, required, hint, children, className = '' }) {
   return (
     <label className={`field ${className}`}>
-      {label && <span className="field-label">{label}{required && <em>*</em>}</span>}
+      {label && (
+        <span className="field-label">
+          {label}{required && <em>*</em>}
+          {hint && <span className="field-hint">{hint}</span>}
+        </span>
+      )}
       {children}
     </label>
   );
@@ -176,7 +182,7 @@ export function Modal({ open, onClose, title, children, footer, width = 620 }) {
       <div className="modal" style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-labelledby={titleId.current} ref={ref}>
         <div className="modal-head">
           <h3 id={titleId.current}>{title}</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Fechar">&times;</button>
+          <button className="icon-btn" onClick={onClose} aria-label="Fechar"><IconX size={16} /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -252,7 +258,7 @@ export function Collapse({ title, summary, defaultOpen = false, children }) {
       <button type="button" className="collapse-head" onClick={() => setOpen(!open)}>
         <span className="collapse-title">{title}</span>
         {summary && <span className="collapse-summary">{summary}</span>}
-        <span className="collapse-chevron">{open ? '▾' : '▸'}</span>
+        <span className="collapse-chevron"><IconChevronRight size={12} /></span>
       </button>
       {open && <div className="collapse-body">{children}</div>}
     </div>

@@ -40,8 +40,15 @@ export const api = {
 /** URL do download da evidência de uma execução (usar em <a href> ou <img src>). */
 export const evidenceUrl = (executionId) => `/api/executions/${executionId}/attachment`;
 
+/** URL de uma evidência individual (step-N.png) citada no Resultado Obtido (galeria lightbox). */
+export const executionEvidenceUrl = (executionId, filename) =>
+  `/api/executions/${executionId}/evidence/${encodeURIComponent(String(filename || ''))}`;
+
 /** URL do download da evidência de um bug. */
 export const bugEvidenceUrl = (bugId) => `/api/bugs/${bugId}/attachment`;
+
+/** URL de download/exibição de um anexo de tarefa. */
+export const taskAttachmentUrl = (attachmentId) => `/api/tasks/attachments/${attachmentId}`;
 
 /** Lê um File/Blob e devolve base64 (sem prefixo data:). */
 export const fileToBase64 = (file) => new Promise((resolve, reject) => {

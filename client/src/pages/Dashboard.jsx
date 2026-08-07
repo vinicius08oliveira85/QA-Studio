@@ -88,7 +88,7 @@ function DashboardBody({ isTask, taskId, current, currentTask }) {
             <tbody>
               {d.lowCoverage.map((r) => (
                 <tr key={r.code}>
-                  <td className="cell-title">{r.code}</td>
+                  <td className="cell-code">{r.code}</td>
                   <td>{r.title}</td>
                   <td><Badge tone={toneFor(r.priority)}>{r.priority}</Badge></td>
                 </tr>
@@ -99,7 +99,7 @@ function DashboardBody({ isTask, taskId, current, currentTask }) {
       )}
 
       <div className="dash-grid">
-        <div className="panel dash-col">
+        <div className="panel dash-col wide">
           <h2>Execuções recentes</h2>
           {d.recentExecutions.length === 0 && <Empty>Nenhuma execução.</Empty>}
           <table className="table">
@@ -151,7 +151,7 @@ function DashboardBody({ isTask, taskId, current, currentTask }) {
             ))}
           </div>
           <div className="mt">
-            <h2>Casos por modo</h2>
+            <h3>Casos por modo</h3>
             {d.casesByMode.map((m) => (
               <div className="kv" key={m.execution_mode}><span className="k">{m.execution_mode}</span><span className="v">{m.c}</span></div>
             ))}

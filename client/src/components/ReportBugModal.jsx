@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Btn, Field, Input, Modal, Select, Textarea } from './ui.jsx';
+import { IconPaperclip } from './Icon.jsx';
 
 /**
  * Modal compartilhado de "Reportar bug".
@@ -60,7 +61,7 @@ export default function ReportBugModal({ form, onChange, onCancel, onSubmit, con
       </div>
       {file ? (
         <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-          <span className="small">📎 {file.name}</span>
+          <span className="small"><IconPaperclip size={12} /> {file.name}</span>
           <Btn className="gray small" onClick={() => setFile(null)}>Remover</Btn>
         </div>
       ) : (

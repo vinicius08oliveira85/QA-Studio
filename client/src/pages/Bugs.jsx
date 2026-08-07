@@ -2,6 +2,7 @@
 import { useApp } from '../context.jsx';
 import { api, bugEvidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, EvidenceBox, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
+import { IconPaperclip } from '../components/Icon.jsx';
 import { BUG_STATUS, SEVERITIES, toneFor } from '../utils.js';
 
 const blank = {
@@ -138,7 +139,7 @@ export default function Bugs() {
               <tbody>
                 {filtered.map((b) => (
                   <tr key={b.id}>
-                    <td className="cell-title">{b.code}</td>
+                    <td className="cell-code">{b.code}</td>
                     <td className="cell-title">{b.title}</td>
                     <td>{b.test_case_code || '-'}</td>
                     <td><Badge tone={toneFor(b.severity)}>{b.severity}</Badge></td>
@@ -147,7 +148,7 @@ export default function Bugs() {
                     <td>
                       {b.attachment_path ? (
                         <a className="evidence-chip" href={bugEvidenceUrl(b.id)} target="_blank" rel="noreferrer" title="Abrir evidência">
-                          📎 {b.attachment_path.split('/').pop()}
+                          <IconPaperclip size={12} /> {b.attachment_path.split('/').pop()}
                         </a>
                       ) : <span className="muted small">—</span>}
                     </td>

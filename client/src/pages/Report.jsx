@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context.jsx';
 import { api, bugEvidenceUrl, evidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Header, Loading, Modal } from '../components/ui.jsx';
+import { IconAlert, IconCheck, IconPaperclip, IconX } from '../components/Icon.jsx';
 import { toneFor } from '../utils.js';
 
 const RESULT_COLORS = { 'Passou': 'green', 'Falhou': 'red', 'Bloqueado': 'red', 'Não Executado': 'gray', 'Pendente': 'amber' };
@@ -26,7 +27,7 @@ function VerdictBanner({ verdict, task }) {
   return (
     <div className={`verdict verdict-${tone} mb`}>
       <div className="verdict-icon" aria-hidden="true">
-        {verdict.key === 'apto' ? '✓' : ['nao_apto', 'bloqueado'].includes(verdict.key) ? '✕' : verdict.key === 'nao_executado' ? '·' : '!'}
+        {verdict.key === 'apto' ? <IconCheck size={18} /> : ['nao_apto', 'bloqueado'].includes(verdict.key) ? <IconX size={18} /> : verdict.key === 'nao_executado' ? '·' : <IconAlert size={18} />}
       </div>
       <div className="verdict-body">
         <div className="verdict-label">{verdict.label}</div>
@@ -221,7 +222,7 @@ export default function Report() {
                   <tbody>
                     {data.attention_cases.map((c) => (
                       <tr key={c.code}>
-                        <td className="cell-title">{c.code}</td>
+                        <td className="cell-code">{c.code}</td>
                         <td className="cell-title">{c.title}</td>
                         <td>{c.requirement_code || '-'}</td>
                         <td><Badge tone={RESULT_COLORS[c.result] || 'red'}>{c.result}</Badge></td>
@@ -247,7 +248,7 @@ export default function Report() {
                   <tbody>
                     {data.open_bugs_list.map((b) => (
                       <tr key={b.code}>
-                        <td className="cell-title">{b.code}</td>
+                        <td className="cell-code">{b.code}</td>
                         <td className="cell-title">{b.title}</td>
                         <td><Badge tone={toneFor(b.severity)}>{b.severity}</Badge></td>
                         <td><Badge tone={toneFor(b.priority)}>{b.priority}</Badge></td>
@@ -255,7 +256,7 @@ export default function Report() {
                         <td><Badge tone={toneFor(b.status)}>{b.status}</Badge></td>
                         <td>
                           {b.attachment_path ? (
-                            <a className="evidence-chip" href={bugEvidenceUrl(b.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                            <a className="evidence-chip" href={bugEvidenceUrl(b.id)} target="_blank" rel="noreferrer" title="Abrir evidência"><IconPaperclip size={12} /> abrir</a>
                           ) : '-'}
                         </td>
                       </tr>
@@ -309,7 +310,7 @@ export default function Report() {
                   <tbody>
                     {data.cases.map((c) => (
                       <tr key={c.id}>
-                        <td className="cell-title">{c.code}</td>
+                        <td className="cell-code">{c.code}</td>
                         <td className="cell-title">{c.title}</td>
                         <td>{c.requirement_code || '-'}</td>
                         <td><Badge tone={c.type === 'API' ? 'green' : c.type === 'Fumaça' ? 'amber' : 'blue'}>{c.type}</Badge></td>
@@ -355,7 +356,7 @@ export default function Report() {
                         <td><Badge tone={RESULT_COLORS[e.result] || 'gray'}>{e.result}</Badge></td>
                         <td>
                           {e.attachment_path ? (
-                            <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                            <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência"><IconPaperclip size={12} /> abrir</a>
                           ) : <span className="muted small">—</span>}
                         </td>
                         <td><Btn className="ghost small" onClick={() => openExecution(e.id)}>Detalhes</Btn></td>
@@ -383,7 +384,7 @@ export default function Report() {
             {viewing.attachment_path && (
               <div className="highlight">
                 <strong>Evidência:</strong>{' '}
-                <a href={evidenceUrl(viewing.id)} target="_blank" rel="noreferrer">📎 {viewing.attachment_path.split('/').pop()}</a>
+                <a href={evidenceUrl(viewing.id)} target="_blank" rel="noreferrer"><IconPaperclip size={12} /> {viewing.attachment_path.split('/').pop()}</a>
               </div>
             )}
             <h3>Passos executados</h3>

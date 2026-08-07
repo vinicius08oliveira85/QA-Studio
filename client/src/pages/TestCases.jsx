@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, evidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
+import { IconPaperclip } from '../components/Icon.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { CASE_STATUS, CASE_TYPES, EXECUTION_MODES, PRIORITIES, toneFor } from '../utils.js';
 
@@ -183,7 +184,7 @@ export default function TestCases() {
               <tbody>
                 {filtered.map((tc) => (
                   <tr key={tc.id}>
-                    <td className="cell-title">{tc.source === 'ia' && <Badge tone="blue">IA</Badge>} {tc.code}</td>
+                    <td className="cell-code">{tc.source === 'ia' && <Badge tone="blue">IA</Badge>} {tc.code}</td>
                     <td className="cell-title">{tc.title}<div className="cell-sub">{tc.scenario_title}</div></td>
                     <td><Badge tone={tc.type === 'API' ? 'green' : tc.type === 'Fumaça' ? 'amber' : 'blue'}>{tc.type}</Badge></td>
                     <td><Badge tone={tc.execution_mode === 'Automatizado' ? 'blue' : 'gray'}>{tc.execution_mode}</Badge></td>
@@ -326,7 +327,7 @@ export default function TestCases() {
                     <td>{e.bugs_count}</td>
                     <td>
                       {e.attachment_path ? (
-                        <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                        <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência"><IconPaperclip size={12} /> abrir</a>
                       ) : <span className="muted small">—</span>}
                     </td>
                     <td><Btn className="ghost small" onClick={() => navigate(`/tarefas/${taskId}/execucao/${routeOf(detail.type)}?case=${detail.id}&exec=${e.id}`)}>Ver</Btn></td>
