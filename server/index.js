@@ -24,6 +24,11 @@ const app = express();
 app.disable('x-powered-by');
 if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use(helmet());
+// Upload de evidências em base64 pode passar de 100kb (padrão do express.json).
+// Registrar com limite maior ANTES do parser global: para essa rota o body já é
+// consumido aqui (o global não re-parseia) e o limite maior só se aplica a ela.
+const EVIDENCE_MAX_BYTES = Number(process.env.EVIDENCE_MAX_BYTES || 15 * 1024 * 1024);
+app.use('/api/executions', express.json({ limit: EVIDENCE_MAX_BYTES }));
 app.use(express.json());
 
 // Rate limiting global e específico para endpoints caros (IA paga / spawn de processos).

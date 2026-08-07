@@ -2,7 +2,8 @@
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context.jsx';
 import { api, fmtDate } from '../api.js';
-import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { Badge, Btn, Empty, ErrorBanner, EvidenceBox, Field, Header, Input, Loading, Modal, Select, Textarea, useList } from '../components/ui.jsx';
+import { evidenceUrl } from '../api.js';
 import EnvSelect from '../components/EnvSelect.jsx';
 import ReportBugModal from '../components/ReportBugModal.jsx';
 import AgentChat from '../components/AgentChat.jsx';
@@ -350,7 +351,7 @@ export default function Execution({ type }) {
         {history.length === 0 ? <Empty>Nenhuma execução registrada ainda.</Empty> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Data</th><th>Caso</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th /></tr></thead>
+              <thead><tr><th>Data</th><th>Caso</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th>Evidência</th><th /></tr></thead>
               <tbody>
                 {history.map((e) => (
                   <tr key={e.id}>
@@ -359,6 +360,13 @@ export default function Execution({ type }) {
                     <td>{e.environment}</td>
                     <td><Badge tone={toneFor(e.result)}>{e.result}</Badge></td>
                     <td>{e.bugs_count}</td>
+                    <td>
+                      {e.attachment_path ? (
+                        <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">
+                          📎 {e.attachment_path.split('/').pop()}
+                        </a>
+                      ) : <span className="muted small">—</span>}
+                    </td>
                     <td>
                       <div className="row-actions">
                         <Btn className="ghost small" onClick={() => api.get('/executions/' + e.id).then(setViewing).catch((er) => setError(er.message || 'Falha ao carregar execução.'))}>Ver</Btn>
@@ -437,6 +445,16 @@ export default function Execution({ type }) {
             </div>
             {viewing.actual_result && <div className="highlight"><strong>Resultado geral:</strong> {viewing.actual_result}</div>}
             {viewing.notes && <div className="kv"><span className="k">Observações</span><span className="v">{viewing.notes}</span></div>}
+            <div className="mt mb">
+              <EvidenceBox
+                executionId={viewing.id}
+                attachmentPath={viewing.attachment_path}
+                onChange={() => {
+                  api.get('/executions/' + viewing.id).then(setViewing).catch(() => {});
+                  refreshExecs();
+                }}
+              />
+            </div>
             <h3>Passos executados</h3>
             {viewing.steps.length === 0 && <Empty>Sem passos.</Empty>}
             {viewing.steps.map((s) => (

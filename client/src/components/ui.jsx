@@ -1,4 +1,93 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { api, evidenceUrl, fileToBase64 } from '../api.js';
+
+/**
+ * Bloco de evidência de execução: upload, preview, download e remoção.
+ * props: executionId, attachmentPath, onChange (recebe attachment_path ou ''), small
+ */
+export function EvidenceBox({ executionId, attachmentPath, onChange, label = 'Evidência (screenshot/anexo)' }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState(null);
+  const has = Boolean(attachmentPath);
+
+  useEffect(() => { setPreview(null); setError(''); }, [attachmentPath]);
+
+  const upload = async (file) => {
+    if (!file || !executionId) return;
+    setBusy(true);
+    setError('');
+    try {
+      const data = await fileToBase64(file);
+      const r = await api.post(`/executions/${executionId}/attachment`, { filename: file.name, data });
+      if (onChange) onChange(r.attachment_path || `attachments/${file.name}`);
+      if (inputRef.current) inputRef.current.value = '';
+    } catch (e) {
+      setError(e?.message || 'Falha ao enviar evidência.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!executionId) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.del(`/executions/${executionId}/attachment`);
+      if (onChange) onChange('');
+    } catch (e) {
+      setError(e?.message || 'Falha ao remover evidência.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isImage = /(png|jpe?g|gif|webp|bmp)$/i.test(attachmentPath || '');
+
+  return (
+    <div className="evidence-box">
+      <span className="field-label">{label}</span>
+      {!has && !preview && (
+        <div className="evidence-drop" onClick={() => inputRef.current?.click()} role="button" tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}>
+          <span>{busy ? 'Enviando...' : 'Clique para anexar screenshot ou arquivo'}</span>
+          <input ref={inputRef} type="file" hidden
+            accept="image/*,.pdf,.txt,.log,.json,.csv,.html,.xml,.zip"
+            onChange={(e) => upload(e.target.files?.[0])} />
+        </div>
+      )}
+      {(has || preview) && (
+        <div className="evidence-file">
+          <div className="evidence-thumb">
+            {isImage ? (
+              <img
+                src={preview || evidenceUrl(executionId)}
+                alt="Evidência"
+                onClick={() => window.open(evidenceUrl(executionId), '_blank')}
+                style={{ cursor: 'zoom-in' }}
+              />
+            ) : (
+              <span className="evidence-file-icon">📄</span>
+            )}
+          </div>
+          <div className="evidence-meta">
+            <span className="evidence-name">{attachmentPath?.split('/').pop() || 'evidência'}</span>
+            <div className="evidence-actions">
+              <a className="btn ghost small" href={evidenceUrl(executionId)} target="_blank" rel="noreferrer">Abrir</a>
+              {onChange && (
+                <Btn className="danger small" onClick={remove} disabled={busy}>Remover</Btn>
+              )}
+            </div>
+            {error && <div className="small" style={{ color: 'var(--red)' }}>{error}</div>}
+          </div>
+        </div>
+      )}
+      {!has && preview && error && <div className="small" style={{ color: 'var(--red)' }}>{error}</div>}
+    </div>
+  );
+}
 
 export function Field({ label, required, children, className = '' }) {
   return (

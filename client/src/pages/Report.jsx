@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context.jsx';
-import { api, fmtDate } from '../api.js';
+import { api, evidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Header, Loading, Modal } from '../components/ui.jsx';
 import { toneFor } from '../utils.js';
 
@@ -337,7 +337,7 @@ export default function Report() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
-                    <tr><th>Data</th><th>Caso</th><th>Ambiente</th><th>Executado por</th><th>Resultado</th><th /></tr>
+                    <tr><th>Data</th><th>Caso</th><th>Ambiente</th><th>Executado por</th><th>Resultado</th><th>Evidência</th><th /></tr>
                   </thead>
                   <tbody>
                     {data.executions.map((e) => (
@@ -347,6 +347,11 @@ export default function Report() {
                         <td>{e.environment}</td>
                         <td>{e.tester}</td>
                         <td><Badge tone={RESULT_COLORS[e.result] || 'gray'}>{e.result}</Badge></td>
+                        <td>
+                          {e.attachment_path ? (
+                            <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                          ) : <span className="muted small">—</span>}
+                        </td>
                         <td><Btn className="ghost small" onClick={() => openExecution(e.id)}>Detalhes</Btn></td>
                       </tr>
                     ))}
@@ -369,6 +374,12 @@ export default function Report() {
             </div>
             {viewing.actual_result && <div className="highlight"><strong>Resultado geral:</strong> {viewing.actual_result}</div>}
             {viewing.notes && <div className="kv"><span className="k">Observações</span><span className="v">{viewing.notes}</span></div>}
+            {viewing.attachment_path && (
+              <div className="highlight">
+                <strong>Evidência:</strong>{' '}
+                <a href={evidenceUrl(viewing.id)} target="_blank" rel="noreferrer">📎 {viewing.attachment_path.split('/').pop()}</a>
+              </div>
+            )}
             <h3>Passos executados</h3>
             {!viewing.steps?.length && <Empty>Sem passos registrados.</Empty>}
             {viewing.steps?.map((s) => (

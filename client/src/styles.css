@@ -468,6 +468,54 @@ table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .print-only { display: none; }
 .report .panel { break-inside: avoid; }
 
+/* Evidências de execução */
+.evidence-box { display: flex; flex-direction: column; gap: 6px; }
+.evidence-drop {
+  border: 1.5px dashed #c3cfe4;
+  border-radius: var(--radius-sm);
+  padding: 14px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.evidence-drop:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.evidence-drop:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.evidence-file {
+  display: flex; gap: 10px; align-items: flex-start;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; background: #fcfdff;
+}
+.evidence-thumb { flex-shrink: 0; }
+.evidence-thumb img {
+  width: 84px; height: 60px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--border);
+  display: block; background: var(--gray-bg);
+}
+.evidence-file-icon {
+  width: 84px; height: 60px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--gray-bg);
+  display: grid; place-items: center; font-size: 24px;
+}
+.evidence-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.evidence-name {
+  font-size: 12px; font-weight: 600; word-break: break-all;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.evidence-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.evidence-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 600;
+  color: var(--blue); background: var(--blue-bg);
+  border: 1px solid var(--blue-border);
+  border-radius: 999px; padding: 2px 8px;
+  text-decoration: none; white-space: nowrap;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+  transition: filter .13s;
+}
+.evidence-chip:hover { filter: brightness(.97); text-decoration: underline; }
+
 /* Banner de parecer executivo (relatório para PO) */
 .verdict {
   display: flex; align-items: center; gap: 12px;

@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context.jsx';
-import { api, fmtDate } from '../api.js';
+import { api, evidenceUrl, fmtDate } from '../api.js';
 import { Badge, Btn, Empty, ErrorBanner, Field, Header, Input, Loading, Modal, Select, Textarea, useAction, useList } from '../components/ui.jsx';
 import AiModal from '../components/AiModal.jsx';
 import { CASE_STATUS, CASE_TYPES, EXECUTION_MODES, PRIORITIES, toneFor } from '../utils.js';
@@ -316,7 +316,7 @@ export default function TestCases() {
             <h3>Execuções deste caso</h3>
             {detail.executions.length === 0 && <Empty>Nenhuma execução registrada.</Empty>}
             <table className="table">
-              <thead><tr><th>Data</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th /></tr></thead>
+              <thead><tr><th>Data</th><th>Ambiente</th><th>Resultado</th><th>Bugs</th><th>Evidência</th><th /></tr></thead>
               <tbody>
                 {detail.executions.map((e) => (
                   <tr key={e.id}>
@@ -324,6 +324,11 @@ export default function TestCases() {
                     <td>{e.environment}</td>
                     <td><Badge tone={toneFor(e.result)}>{e.result}</Badge></td>
                     <td>{e.bugs_count}</td>
+                    <td>
+                      {e.attachment_path ? (
+                        <a className="evidence-chip" href={evidenceUrl(e.id)} target="_blank" rel="noreferrer" title="Abrir evidência">📎 abrir</a>
+                      ) : <span className="muted small">—</span>}
+                    </td>
                     <td><Btn className="ghost small" onClick={() => navigate(`/tarefas/${taskId}/execucao/${routeOf(detail.type)}?case=${detail.id}&exec=${e.id}`)}>Ver</Btn></td>
                   </tr>
                 ))}

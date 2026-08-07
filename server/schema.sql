@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS executions (
   result        TEXT DEFAULT 'Pendente',     -- Pendente | Passou | Falhou | Bloqueado | Não Executado
   actual_result TEXT DEFAULT '',
   notes         TEXT DEFAULT '',
+  attachment_path TEXT DEFAULT '',          -- evidência (caminho relativo em data/attachments)
   created_at    TEXT DEFAULT (datetime('now'))
 );
 

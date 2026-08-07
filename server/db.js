@@ -12,6 +12,9 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = process.env.QA_DB_PATH || path.join(dataDir, 'qa.db');
 
+// Diretório de evidências (anexos de execuções). Viver junto do banco, criado sob demanda.
+const attachmentsDir = path.join(dataDir, 'attachments');
+if (!fs.existsSync(attachmentsDir)) fs.mkdirSync(attachmentsDir, { recursive: true });
 
 const db = new DatabaseSync(dbPath);
 console.log('[db] Banco SQLite em:', dbPath);
@@ -37,6 +40,11 @@ for (const table of sourceTables) {
 }
 if (tableColumns('test_strategies').length && !hasColumn('test_strategies', 'requirement_id')) {
   db.exec('ALTER TABLE test_strategies ADD COLUMN requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL');
+}
+
+// Migração: attachment_path em executions (evidências de execução — bancos antigos)
+if (tableColumns('executions').length && !hasColumn('executions', 'attachment_path')) {
+  db.exec("ALTER TABLE executions ADD COLUMN attachment_path TEXT DEFAULT ''");
 }
 
 // Migração: task_id nas entidades do ciclo de testes (bancos antigos)
@@ -150,5 +158,8 @@ db.resolveTask = (taskId) => {
   if (!task) return null;
   return task;
 };
+
+/** Caminho absoluto do diretório de evidências. */
+db.attachmentsDir = () => attachmentsDir;
 
 module.exports = db;

@@ -37,6 +37,21 @@ export const api = {
   del: (path) => request(path, { method: 'DELETE' })
 };
 
+/** URL do download da evidência de uma execução (usar em <a href> ou <img src>). */
+export const evidenceUrl = (executionId) => `/api/executions/${executionId}/attachment`;
+
+/** Lê um File/Blob e devolve base64 (sem prefixo data:). */
+export const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const result = String(reader.result || '');
+    const idx = result.indexOf(',');
+    resolve(idx >= 0 ? result.slice(idx + 1) : result);
+  };
+  reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'));
+  reader.readAsDataURL(file);
+});
+
 export const fmtDate = (d) => {
   if (!d) return '';
   const raw = String(d).trim();
