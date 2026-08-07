@@ -247,6 +247,19 @@ CREATE TABLE IF NOT EXISTS release_requirements (
   UNIQUE(release_id, requirement_id)
 );
 
+-- ---------------------------------------------------------------
+-- Materiais anexados à tarefa (imagens/arquivos para contexto da IA e do QA)
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL,
+  path       TEXT NOT NULL,              -- attachments/<taskId>-<hash>.<ext>
+  mime       TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments ON task_attachments(task_id);
+
 -- Configurações gerais (chave de IA, modelo, etc.)
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,

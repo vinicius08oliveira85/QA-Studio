@@ -66,4 +66,68 @@ function isImage(abs) {
   return IMAGE_EXT.has(path.extname(abs).replace('.', '').toLowerCase());
 }
 
-module.exports = { saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage };
+/** Extensão permitida de um nome de arquivo (sem o ponto); '' se não permitida. */
+function allowedExt(filename) {
+  const ext = (path.extname(String(filename)).replace('.', '') || 'png').toLowerCase();
+  return ALLOWED_EXT.has(ext) ? ext : '';
+}
+
+/**
+ * Grava um anexo de tarefa (vários por tarefa) e insere na tabela task_attachments.
+ * Retorna a linha criada ou { error }.
+ */
+function saveTaskAttachment(db, taskId, filename, data, mime = '') {
+  if (!data) return { error: 'Arquivo vazio' };
+  let buf;
+  try { buf = Buffer.from(String(data), 'base64'); } catch { return { error: 'Base64 inválido' }; }
+  if (buf.length === 0) return { error: 'Arquivo vazio' };
+
+  const ext = allowedExt(filename);
+  if (!ext) return { error: `Extensão não permitida: .${(path.extname(String(filename)).replace('.', '') || '?').toLowerCase()}` };
+
+  const dir = db.attachmentsDir();
+  const hash = crypto.createHash('sha1').update(String(data)).digest('hex').slice(0, 12);
+  const savedName = `task-${taskId}-${hash}.${ext}`;
+  const abs = path.join(dir, savedName);
+  const rel = `attachments/${savedName}`;
+
+  fs.writeFileSync(abs, buf);
+  const safeName = String(filename || 'anexo').slice(0, 200);
+  const ins = db.prepare(
+    'INSERT INTO task_attachments (task_id, filename, path, mime) VALUES (?,?,?,?)'
+  ).run(taskId, safeName, rel, mime);
+  return { id: Number(ins.lastInsertRowid), filename: String(filename), path: rel, mime };
+}
+
+/** Remove o arquivo de um anexo de tarefa e a linha correspondente. */
+function removeTaskAttachment(db, attachmentId) {
+  const row = db.prepare('SELECT id, path FROM task_attachments WHERE id=?').get(attachmentId);
+  if (!row) return false;
+  if (row.path) removeFileByPath(db, row.path);
+  db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId);
+  return true;
+}
+
+/** Caminho absoluto de um anexo de tarefa se existir; null caso contrário. */
+function resolveTaskAttachment(db, attachmentId) {
+  const row = db.prepare('SELECT id, path, filename FROM task_attachments WHERE id=?').get(attachmentId);
+  if (!row) return null;
+  const dir = path.resolve(db.attachmentsDir());
+  const abs = path.resolve(path.join(dir, path.basename(row.path)));
+  if (!abs.startsWith(dir + path.sep) || !fs.existsSync(abs)) return null;
+  return { abs, filename: row.filename };
+}
+
+/** Apaga os arquivos de todos os anexos de uma tarefa (usar antes de excluir a tarefa). */
+function removeTaskAttachmentsByTask(db, taskId) {
+  const rows = db.prepare('SELECT id, path FROM task_attachments WHERE task_id=?').all(taskId);
+  for (const row of rows) {
+    if (row.path) removeFileByPath(db, row.path);
+  }
+  db.prepare('DELETE FROM task_attachments WHERE task_id=?').run(taskId);
+}
+
+module.exports = {
+  saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage, allowedExt,
+  saveTaskAttachment, removeTaskAttachment, resolveTaskAttachment, removeTaskAttachmentsByTask
+};

@@ -1,4 +1,56 @@
 const express = require('express');
+const fs = require('node:fs');
+const path = require('node:path');
+const { isImage } = require('../attachments');
+
+// Anexos de tarefa que entram como texto (conteúdo analisável pela IA).
+const TEXT_EXT = new Set(['txt', 'md', 'log', 'json', 'csv', 'html', 'xml']);
+const MAX_TEXT_CHARS = 40_000;          // por anexo de texto
+const MAX_IMG_BYTES = 8 * 1024 * 1024;   // por imagem (inline_data)
+const MAX_TOTAL_INLINE = 15 * 1024 * 1024; // total de imagens enviadas ao Gemini
+
+const MIME_BY_EXT = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+};
+
+/**
+ * Monta as partes extras do prompt a partir dos anexos da tarefa:
+ *  - imagens → inline_data (base64)
+ *  - texto (txt/md/json/csv/log/html/xml) → conteúdo como text
+ *  - outros (pdf/zip) → apenas a menção do nome
+ */
+function attachmentParts(db, taskId) {
+  const rows = db.prepare('SELECT * FROM task_attachments WHERE task_id=? ORDER BY id').all(taskId);
+  const parts = [];
+  const names = [];
+  let inlineBytes = 0;
+  for (const a of rows) {
+    const abs = path.join(path.resolve(db.attachmentsDir()), path.basename(a.path));
+    if (!fs.existsSync(abs)) continue;
+    names.push(a.filename);
+    const ext = path.extname(a.filename).replace('.', '').toLowerCase();
+    if (isImage(abs)) {
+      try {
+        const buf = fs.readFileSync(abs);
+        if (buf.length <= MAX_IMG_BYTES && inlineBytes + buf.length <= MAX_TOTAL_INLINE) {
+          inlineBytes += buf.length;
+          parts.push({ inline_data: { mime_type: a.mime || MIME_BY_EXT[ext] || 'image/png', data: buf.toString('base64') } });
+          continue;
+        }
+      } catch { /* segue para a menção */ }
+    }
+    if (TEXT_EXT.has(ext)) {
+      try {
+        const text = fs.readFileSync(abs, 'utf8').slice(0, MAX_TEXT_CHARS);
+        parts.push({ text: `=== Anexo: ${a.filename} ===\n${text}` });
+        continue;
+      } catch { /* segue para a menção */ }
+    }
+    parts.push({ text: `(anexo não-textual: ${a.filename})` });
+  }
+  return { parts, names };
+}
 
 function extractJson(text) {
   if (!text) return null;
@@ -37,7 +89,7 @@ module.exports = (db) => {
   };
 
   router.post('/generate', async (req, res) => {
-    const { prompt } = req.body || {};
+    const { prompt, taskId } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Prompt é obrigatório.' });
 
     const apiKey = process.env.GEMINI_API_KEY || getSetting('geminiApiKey');
@@ -49,8 +101,19 @@ module.exports = (db) => {
     const model = getSetting('geminiModel') || 'gemini-2.0-flash';
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+    // Materiais anexados à tarefa entram como partes extras do prompt (texto/imagem).
+    const extra = taskId ? attachmentParts(db, Number(taskId)) : { parts: [], names: [] };
+    const parts = [{ text: prompt }];
+    if (extra.names.length) {
+      parts.push({
+        text: `Materiais anexados à tarefa (${extra.names.length}): ${extra.names.join(', ')}. ` +
+          'Analise os arquivos e imagens abaixo e use as informações deles para enriquecer a resposta.'
+      });
+      parts.push(...extra.parts);
+    }
     const body = {
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: { responseMimeType: 'application/json' }
     };
 
@@ -85,3 +148,5 @@ module.exports = (db) => {
 
   return router;
 };
+
+module.exports.attachmentParts = attachmentParts;

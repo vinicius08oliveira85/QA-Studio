@@ -1,8 +1,55 @@
 const express = require('express');
+const path = require('node:path');
 const { mergeUpdate } = require('../helpers');
+const {
+  saveTaskAttachment, removeTaskAttachment, resolveTaskAttachment, removeTaskAttachmentsByTask, isImage
+} = require('../attachments');
 
 module.exports = (db) => {
   const router = express.Router();
+
+  // ---- Anexos da tarefa (materiais para contexto da IA / QA) ----
+
+  /** Lista os anexos de uma tarefa. */
+  router.get('/:id/attachments', (req, res) => {
+    const row = db.prepare('SELECT id FROM tasks WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const list = db.prepare(
+      'SELECT id, task_id, filename, mime, created_at FROM task_attachments WHERE task_id=? ORDER BY id'
+    ).all(req.params.id);
+    res.json(list);
+  });
+
+  /** Upload de anexo (JSON: { filename, data, mime }). */
+  router.post('/:id/attachments', (req, res) => {
+    const row = db.prepare('SELECT id FROM tasks WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    const { filename = '', data = '', mime = '' } = req.body || {};
+    const out = saveTaskAttachment(db, req.params.id, filename, data, mime);
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.status(201).json(out);
+  });
+
+  /** Download de um anexo (inline para imagens). */
+  router.get('/attachments/:attId', (req, res) => {
+    const found = resolveTaskAttachment(db, req.params.attId);
+    if (!found) return res.status(404).json({ error: 'Anexo não encontrado' });
+    // Filename do usuário não pode injetar aspas/controle no header.
+    const safeName = path.basename(found.filename).replace(/["\r\n\u0000-\u001f]/g, '');
+    res.setHeader('Content-Disposition', `${isImage(found.abs) ? 'inline' : 'attachment'}; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(found.abs, (err) => {
+      if (err && !res.headersSent) res.status(500).json({ error: 'Falha ao enviar o anexo.' });
+    });
+  });
+
+  /** Remove um anexo (arquivo + linha). */
+  router.delete('/attachments/:attId', (req, res) => {
+    if (!removeTaskAttachment(db, req.params.attId)) {
+      return res.status(404).json({ error: 'Anexo não encontrado' });
+    }
+    res.json({ ok: true });
+  });
 
   const LIST_SQL = `
     SELECT t.*,
@@ -66,6 +113,7 @@ module.exports = (db) => {
   router.delete('/:id', (req, res) => {
     const cur = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Tarefa não encontrada' });
+    removeTaskAttachmentsByTask(db, req.params.id);
     db.prepare('DELETE FROM tasks WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });

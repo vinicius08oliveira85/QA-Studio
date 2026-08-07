@@ -1,7 +1,41 @@
 const express = require('express');
 const path = require('node:path');
+const fs = require('node:fs');
 const { validateTaskOwnership } = require('../helpers');
-const { saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage } = require('../attachments');
+const { saveAttachment, removeAttachment, removeFileByPath, resolveAttachment, isImage, allowedExt } = require('../attachments');
+
+// Evidências individuais (step-N.png) gravadas pelo agent-runner.
+const RUNNER_RUNS = path.join(__dirname, '..', '..', 'agent-runner', 'artifacts', 'runs');
+const RUNNER_ARTIFACTS = path.join(__dirname, '..', '..', 'agent-runner', 'artifacts');
+
+// Bundles são imutáveis depois de escritos: cache execId → bundleDir evita
+// reescanear artifacts/runs/ e reparsear execution.json a cada imagem.
+const bundleCache = new Map();
+
+/**
+ * Localiza o bundle de evidências (artifacts/runs/run-...) de uma execução a partir
+ * do execution.json gravado pelo runner. Mais recente primeiro; null se não achar.
+ */
+function findEvidenceBundle(executionId) {
+  const key = Number(executionId);
+  if (bundleCache.has(key)) return bundleCache.get(key);
+  if (!fs.existsSync(RUNNER_RUNS)) return null;
+  let names;
+  try { names = fs.readdirSync(RUNNER_RUNS); } catch { return null; }
+  let found = null;
+  for (const name of names.sort().reverse()) {
+    const dir = path.join(RUNNER_RUNS, name);
+    try {
+      const metaPath = path.join(dir, 'execution.json');
+      if (!fs.existsSync(metaPath)) continue;
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const id = Number(meta?.id ?? meta?.execution?.id);
+      if (id === Number(executionId)) { found = dir; break; }
+    } catch { /* bundle ilegível — segue */ }
+  }
+  if (found) bundleCache.set(key, found);
+  return found;
+}
 
 module.exports = (db) => {
   const router = express.Router();
@@ -142,6 +176,43 @@ module.exports = (db) => {
     if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
     removeAttachment(db, 'executions', req.params.id);
     res.json({ ok: true });
+  });
+
+  /**
+   * Evidência individual (step-N.png) citada no Resultado Obtido — usada pela
+   * galeria lightbox. Procura no bundle da execução (artifacts/runs/.../screenshots/)
+   * e, como fallback, em artifacts/ (runner GMPTL-141 grava lá direto).
+   */
+  router.get('/:id/evidence/:filename', (req, res) => {
+    const row = db.prepare('SELECT id FROM executions WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Execução não encontrada' });
+    const name = path.basename(String(req.params.filename || ''));
+    if (!name || name === '.' || name === '..' || !allowedExt(name)) {
+      return res.status(400).json({ error: 'Arquivo de evidência inválido' });
+    }
+    const candidates = [];
+    const bundleDir = findEvidenceBundle(req.params.id);
+    if (bundleDir) {
+      candidates.push(path.join(bundleDir, 'screenshots', name));
+      candidates.push(path.join(bundleDir, name));
+    }
+    // Fallback para runners que gravam direto em artifacts/ (ex.: GMPTL-141, sem
+    // bundle): caveat — pode refletir a execução mais recente do mesmo caso, pois
+    // os screenshots só são limpos no início da execução seguinte.
+    candidates.push(path.join(RUNNER_ARTIFACTS, name));
+    for (const abs of candidates) {
+      try {
+        if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+          res.setHeader('Content-Disposition', `${isImage(abs) ? 'inline' : 'attachment'}; filename="${name}"`);
+          res.setHeader('Cache-Control', 'no-store');
+          res.sendFile(abs, (err) => {
+            if (err && !res.headersSent) res.status(500).json({ error: 'Falha ao enviar a evidência.' });
+          });
+          return;
+        }
+      } catch { /* tenta o próximo candidato */ }
+    }
+    res.status(404).json({ error: 'Evidência não encontrada no servidor.' });
   });
 
   return router;
