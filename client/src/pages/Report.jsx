@@ -5,6 +5,7 @@ import { Badge, Btn, Empty, ErrorBanner, Header, Loading, Modal } from '../compo
 import { toneFor } from '../utils.js';
 
 const RESULT_COLORS = { 'Passou': 'green', 'Falhou': 'red', 'Bloqueado': 'red', 'Não Executado': 'gray', 'Pendente': 'amber' };
+const VERDICT_TONES = { green: 'green', amber: 'amber', red: 'red', gray: 'gray' };
 
 function Card({ num, cls = '', lbl }) {
   return (
@@ -17,6 +18,27 @@ function Card({ num, cls = '', lbl }) {
 
 function mdEscape(s) {
   return String(s || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+function VerdictBanner({ verdict, task }) {
+  if (!verdict) return null;
+  const tone = VERDICT_TONES[verdict.tone] || 'gray';
+  return (
+    <div className={`verdict verdict-${tone} mb`}>
+      <div className="verdict-icon" aria-hidden="true">
+        {verdict.key === 'apto' ? '✓' : ['nao_apto', 'bloqueado'].includes(verdict.key) ? '✕' : verdict.key === 'nao_executado' ? '·' : '!'}
+      </div>
+      <div className="verdict-body">
+        <div className="verdict-label">{verdict.label}</div>
+        <div className="verdict-summary">{verdict.summary}</div>
+      </div>
+      <div className="verdict-meta">
+        <span><strong>Tarefa:</strong> {task?.code}</span>
+        <span><strong>Status:</strong> {task?.status}</span>
+        <span><strong>Responsável:</strong> {task?.assignee || '—'}</span>
+      </div>
+    </div>
+  );
 }
 
 export default function Report() {
@@ -46,14 +68,18 @@ export default function Report() {
 
   const exportMarkdown = () => {
     if (!data) return;
-    const { task, summary, requirements, cases, executions } = data;
+    const { task, summary, requirements, cases, executions, verdict, open_bugs_list, attention_cases } = data;
     const L = [];
     L.push(`# Relatório de Testes — ${task.code} — ${task.title}`);
     L.push('');
-    L.push(`- **Status da tarefa:** ${task.status}`);
-    L.push(`- **Gerado em:** ${fmtDate(data.generated_at)}`);
+    L.push(`**Parecer:** ${verdict?.label || '—'}`);
+    L.push(`**${verdict?.summary || ''}**`);
     L.push('');
-    L.push('## Resumo');
+    L.push(`- **Status da tarefa:** ${task.status}${task.assignee ? ` | **Responsável:** ${task.assignee}` : ''}`);
+    L.push(`- **Prioridade:** ${task.priority}`);
+    L.push(`- **Gerado em:** ${fmtDate(data.generated_at)}${data.last_activity ? ` | **Última atividade:** ${fmtDate(data.last_activity)}` : ''}`);
+    L.push('');
+    L.push('## Resumo executivo');
     L.push('');
     L.push('| Métrica | Valor |');
     L.push('|---|---|');
@@ -64,9 +90,29 @@ export default function Report() {
     L.push(`| Falhou | ${summary.failed} |`);
     L.push(`| Bloqueado | ${summary.blocked} |`);
     L.push(`| Aprovação | ${summary.passRate}% |`);
-    L.push(`| Requisitos cobertos | ${summary.requirements_covered}/${summary.requirements_total} |`);
+    L.push(`| Cobertura de requisitos | ${summary.requirements_covered}/${summary.requirements_total} (${summary.requirement_coverage}%) |`);
     L.push(`| Bugs em aberto | ${summary.open_bugs} |`);
     L.push('');
+    if (attention_cases.length > 0) {
+      L.push('## Pontos de atenção (falhas e bloqueios)');
+      L.push('');
+      L.push('| Código | Caso | Requisito | Resultado | Ambiente |');
+      L.push('|---|---|---|---|---|');
+      for (const c of attention_cases) {
+        L.push(`| ${mdEscape(c.code)} | ${mdEscape(c.title)} | ${mdEscape(c.requirement_code || '-')} | ${mdEscape(c.result)} | ${mdEscape(c.environment || '-')} |`);
+      }
+      L.push('');
+    }
+    if (open_bugs_list.length > 0) {
+      L.push('## Bugs em aberto');
+      L.push('');
+      L.push('| Bug | Título | Severidade | Prioridade | Caso relacionado |');
+      L.push('|---|---|---|---|---|');
+      for (const b of open_bugs_list) {
+        L.push(`| ${mdEscape(b.code)} | ${mdEscape(b.title)} | ${mdEscape(b.severity)} | ${mdEscape(b.priority)} | ${mdEscape(b.test_case_code || '-')} |`);
+      }
+      L.push('');
+    }
     L.push('## Cobertura por requisito');
     L.push('');
     L.push('| Requisito | Casos | Executados | Passou | Falhou | Bloqueado |');
@@ -107,7 +153,7 @@ export default function Report() {
     <div className="report">
       <div className="print-only report-print-head">
         <h1>Relatório de Testes — {data?.task?.code} — {data?.task?.title}</h1>
-        <div>Gerado em {fmtDate(data?.generated_at)} · Status: {data?.task?.status}</div>
+        <div>Gerado em {fmtDate(data?.generated_at)} · Status: {data?.task?.status} · Parecer: {data?.verdict?.label}</div>
       </div>
 
       <Header
@@ -128,6 +174,8 @@ export default function Report() {
         <Empty>Nenhum dado para o relatório.</Empty>
       ) : (
         <>
+          <VerdictBanner verdict={data.verdict} task={data.task} />
+
           <div className="cards report-cards">
             <Card num={data.summary.totalCases} lbl="Casos totais" />
             <Card num={data.summary.executedCases} cls="blue" lbl="Executados" />
@@ -159,6 +207,58 @@ export default function Report() {
               </div>
             )}
           </div>
+
+          {data.attention_cases.length > 0 && (
+            <div className="panel mb">
+              <h2>Pontos de atenção ({data.attention_cases.length})</h2>
+              <p className="muted small">Casos com última execução <strong>Falhou</strong> ou <strong>Bloqueado</strong> — precisam de correção ou desbloqueio antes da liberação.</p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr><th>Código</th><th>Caso</th><th>Requisito</th><th>Resultado</th><th>Ambiente</th><th>Detalhe</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.attention_cases.map((c) => (
+                      <tr key={c.code}>
+                        <td className="cell-title">{c.code}</td>
+                        <td className="cell-title">{c.title}</td>
+                        <td>{c.requirement_code || '-'}</td>
+                        <td><Badge tone={RESULT_COLORS[c.result] || 'red'}>{c.result}</Badge></td>
+                        <td>{c.environment || '-'}</td>
+                        <td className="cell-sub">{c.actual_result ? (String(c.actual_result).slice(0, 120)) : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {data.open_bugs_list.length > 0 && (
+            <div className="panel mb">
+              <h2>Bugs em aberto ({data.open_bugs_list.length})</h2>
+              <p className="muted small">Bugs com status <strong>Aberto</strong> ou <strong>Em Correção</strong>.</p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr><th>Bug</th><th>Título</th><th>Severidade</th><th>Prioridade</th><th>Caso relacionado</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.open_bugs_list.map((b) => (
+                      <tr key={b.code}>
+                        <td className="cell-title">{b.code}</td>
+                        <td className="cell-title">{b.title}</td>
+                        <td><Badge tone={toneFor(b.severity)}>{b.severity}</Badge></td>
+                        <td><Badge tone={toneFor(b.priority)}>{b.priority}</Badge></td>
+                        <td>{b.test_case_code || '-'}</td>
+                        <td><Badge tone={toneFor(b.status)}>{b.status}</Badge></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="panel mb">
             <h2>Cobertura por requisito</h2>

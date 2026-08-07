@@ -380,6 +380,38 @@ table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .print-only { display: none; }
 .report .panel { break-inside: avoid; }
 
+/* Banner de parecer executivo (relatório para PO) */
+.verdict {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--panel);
+  box-shadow: var(--shadow); margin-bottom: 10px;
+}
+.verdict-icon {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 16px; font-weight: 800; color: #fff;
+}
+.verdict-body { flex: 1; min-width: 0; }
+.verdict-label { font-size: 14px; font-weight: 800; }
+.verdict-summary { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.verdict-meta {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-end;
+  font-size: 11px; color: var(--muted); white-space: nowrap; flex-shrink: 0;
+}
+.verdict-meta strong { color: var(--text); }
+.verdict-green { background: var(--green-bg); border-color: #b9e0c8; }
+.verdict-green .verdict-icon { background: var(--green); }
+.verdict-amber { background: var(--amber-bg); border-color: #f0d2a0; }
+.verdict-amber .verdict-icon { background: var(--amber); }
+.verdict-red { background: var(--red-bg); border-color: #f0c0c0; }
+.verdict-red .verdict-icon { background: var(--red); }
+.verdict-gray { background: var(--gray-bg); border-color: var(--border); }
+.verdict-gray .verdict-icon { background: var(--gray); }
+@media (max-width: 720px) {
+  .verdict { flex-wrap: wrap; }
+  .verdict-meta { flex-direction: row; gap: 10px; align-items: center; flex-basis: 100%; }
+}
+
 @media print {
   .sidebar, .task-tabs, .page-actions, .no-print { display: none !important; }
   .layout { display: block; }

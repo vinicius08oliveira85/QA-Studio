@@ -47,6 +47,8 @@ function seedTask(db) {
 
   db.prepare(`INSERT INTO bugs (project_id, task_id, test_case_id, code, title, severity, status)
     VALUES (?,?,?,?,?,?,?)`).run(pid, tid, tc2, 'BUG-001', 'Bug no login', 'Alta', 'Aberto');
+  db.prepare(`INSERT INTO bugs (project_id, task_id, test_case_id, code, title, severity, status)
+    VALUES (?,?,?,?,?,?,?)`).run(pid, tid, tc2, 'BUG-002', 'Bug secundário', 'Baixa', 'Corrigido');
   return { pid, tid, tc1, tc2, tc3, tc4, r1, r2 };
 }
 
@@ -114,6 +116,86 @@ test('resposta do relatório tem shape esperado', async () => {
 
   assert.strictEqual(body.executions.length, 4);
   assert.strictEqual(body.executions[0].result, 'Bloqueado'); // ordem: mais recente primeiro
+
+  // Novos campos: veredito executivo, bugs em aberto e pontos de atenção
+  assert.ok(body.verdict, 'verdict presente');
+  assert.ok(['nao_executado', 'apto', 'apto_ressalvas', 'nao_apto', 'em_execucao'].includes(body.verdict.key));
+  assert.strictEqual(body.verdict.key, 'nao_apto'); // 1 falha + 1 bloqueio
+  assert.strictEqual(body.verdict.tone, 'red');
+  assert.ok(body.verdict.label && body.verdict.summary);
+  assert.strictEqual(body.open_bugs_list.length, 1);
+  assert.strictEqual(body.open_bugs_list[0].code, 'BUG-001');
+  assert.strictEqual(body.open_bugs_list[0].severity, 'Alta');
+  assert.strictEqual(body.open_bugs_list[0].test_case_code, 'TC-002');
+  assert.strictEqual(body.attention_cases.length, 2); // TC-002 falhou e TC-003 bloqueado
+  assert.ok(body.attention_cases.some((c) => c.code === 'TC-002' && c.result === 'Falhou'));
+  assert.ok(body.attention_cases.some((c) => c.code === 'TC-003' && c.result === 'Bloqueado'));
+  assert.ok(body.last_activity, 'last_activity presente');
+});
+
+test('veredito apto para tarefa com aprovação total', async () => {
+  const db = require('../server/db.js');
+  const { tid, tc1, tc2, tc3 } = seedTask(db);
+  // Todos os casos passam
+  db.prepare("UPDATE executions SET result='Passou' WHERE test_case_id IN (?,?,?)").run(tc1, tc2, tc3);
+  db.prepare("UPDATE bugs SET status='Fechado' WHERE task_id=?").run(tid);
+  const reports = require('../server/routes/reports.js')(db);
+  const handler = routeHandler(reports);
+  const { body } = await callHandler(handler, tid);
+  assert.strictEqual(body.summary.passRate, 100);
+  assert.strictEqual(body.verdict.key, 'apto');
+  assert.strictEqual(body.verdict.tone, 'green');
+  assert.strictEqual(body.attention_cases.length, 0);
+  assert.strictEqual(body.open_bugs_list.length, 0);
+});
+
+test('veredito sem execução quando não há execuções', async () => {
+  const db = require('../server/db.js');
+  const pid = Number(db.prepare('INSERT INTO projects (name) VALUES (?)').run('Proj2').lastInsertRowid);
+  const tid = Number(db.prepare('INSERT INTO tasks (project_id, code, title) VALUES (?,?,?)')
+    .run(pid, 'TAR-999', 'Tarefa sem execução').lastInsertRowid);
+  const reports = require('../server/routes/reports.js')(db);
+  const handler = routeHandler(reports);
+  const { body } = await callHandler(handler, tid);
+  assert.strictEqual(body.summary.executedCases, 0);
+  assert.strictEqual(body.verdict.key, 'nao_executado');
+  assert.strictEqual(body.verdict.tone, 'gray');
+  assert.strictEqual(body.last_activity, null);
+});
+
+test('veredito bloqueado quando todos os casos executados estão bloqueados', async () => {
+  const db = require('../server/db.js');
+  const { tid, tc1, tc2, tc3 } = seedTask(db);
+  // Bloqueia todos os casos executados, sem falhas
+  db.prepare("UPDATE executions SET result='Bloqueado' WHERE test_case_id IN (?,?,?)").run(tc1, tc2, tc3);
+  db.prepare("UPDATE bugs SET status='Fechado' WHERE task_id=?").run(tid);
+  const reports = require('../server/routes/reports.js')(db);
+  const handler = routeHandler(reports);
+  const { body } = await callHandler(handler, tid);
+  assert.strictEqual(body.summary.failed, 0);
+  assert.strictEqual(body.summary.blocked, 3);
+  assert.strictEqual(body.summary.passRate, 0);
+  assert.strictEqual(body.verdict.key, 'bloqueado');
+  assert.strictEqual(body.verdict.tone, 'red');
+  assert.strictEqual(body.attention_cases.length, 3);
+});
+
+test('execução pendente impede veredito apto sem ressalvas', async () => {
+  const db = require('../server/db.js');
+  const { tid, tc1, tc2, tc3 } = seedTask(db);
+  // TC-001 e TC-002 passam; TC-003 fica com execução Pendente (inconclusiva)
+  db.prepare("UPDATE executions SET result='Passou' WHERE test_case_id IN (?,?)").run(tc1, tc2);
+  db.prepare("UPDATE executions SET result='Pendente' WHERE test_case_id=? AND result != 'Passou'")
+    .run(tc3);
+  db.prepare("UPDATE bugs SET status='Fechado' WHERE task_id=?").run(tid);
+  const reports = require('../server/routes/reports.js')(db);
+  const handler = routeHandler(reports);
+  const { body } = await callHandler(handler, tid);
+  // passRate 67% (2/3), sem falhas nem bloqueios → em execução
+  assert.strictEqual(body.summary.passRate, 67);
+  assert.strictEqual(body.summary.pending, 1);
+  assert.notStrictEqual(body.verdict.key, 'apto');
+  assert.ok(['em_execucao', 'apto_ressalvas'].includes(body.verdict.key));
 });
 
 test('relatório retorna 404 para tarefa inexistente', async () => {
